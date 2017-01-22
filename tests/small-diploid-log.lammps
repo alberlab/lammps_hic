@@ -1,0 +1,148 @@
+LAMMPS (14 Jun 2016)
+units                 lj
+atom_style            bond
+bond_style  hybrid harmonic_upper_bound harmonic_lower_bound
+boundary              f f f
+special_bonds lj/coul 1.0 1.0 1.0
+pair_style lj/cut 200
+read_data input.data
+  orthogonal box = (-6000 -6000 -6000) to (6000 6000 6000)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  20 atoms
+  scanning bonds ...
+  1 = max bonds/atom
+  reading bonds ...
+  10 bonds
+  1 = max # of 1-2 neighbors
+  1 = max # of special neighbors
+mass * 1.0
+group beads type != 2
+20 atoms in group beads
+group dummy type 2
+0 atoms in group dummy
+neighbor 200 bin
+neigh_modify every 10 check yes
+neigh_modify one 2000 page 40000
+fix 1 dummy setforce 0.0 0.0 0.0
+neigh_modify exclude group dummy all check no
+fix 2 beads nve/limit 5.0
+fix 3 beads langevin 20.0 1.0 50.0 38611645
+timestep 0.25
+region mySphere sphere 0.0 0.0 0.0 5200.0
+fix wall beads wall/region mySphere harmonic 10.0 1.0  200
+pair_coeff * * 1.0 178.25311942959
+pair_modify shift yes
+dump   id beads custom 20000 out.lammpstrj id type x y z fx fy fz
+thermo 1000
+run 20000
+Neighbor list info ...
+  1 neighbor list requests
+  update every 10 steps, delay 10 steps, check no
+  max neighbors/atom: 2000, page size: 40000
+  master list distance cutoff = 400
+  ghost atom cutoff = 400
+  binsize = 200 -> bins = 60 60 60
+Memory usage per processor = 5.30194 Mbytes
+Step Temp E_pair E_mol TotEng Press
+       0            0            0    1445538.1    1445538.1 -1.364878e-05
+    1000     26.45217  0.066302192            0    37.760644 2.9658657e-10
+    2000    16.377539  0.046774796            0    23.384767 1.8448154e-10
+    3000    20.067572            0            0     28.59629 2.2065039e-10
+    4000    13.837235   0.81278776            0    20.530848 1.9939117e-10
+    5000    22.326965   0.23949712            0    32.055422 2.6508807e-10
+    6000    17.052975            0            0    24.300489 1.8750378e-10
+    7000     16.16356   0.15410805            0    23.187181 1.8892288e-10
+    8000    9.8464734   0.56016108            0    14.591386 1.435142e-10
+    9000    14.679535            0            0    20.918338 1.6140693e-10
+   10000     9.463323   0.49277297   0.19307315    14.171081 -1.6851508e-10
+   11000    10.092392  0.047711894            0     14.42937 1.163726e-10
+   12000     9.778084            0            0     13.93377 1.0751365e-10
+   13000    8.2469467            0            0    11.751899 9.0678234e-11
+   14000    4.7453729   0.19265371            0      6.95481 6.5998041e-11
+   15000    7.7174542   0.11601767            0     11.11339 9.3753564e-11
+   16000    4.2792869 0.0076266039            0    6.1056104 4.8309519e-11
+   17000    4.1505758  0.099226539            0    6.0137971 5.4703778e-11
+   18000    3.3325288 0.0031364144  0.021961376    4.7739514 -6.5077125e-11
+   19000     2.361493 0.0047935435 0.00074587945    3.3706669 8.0500392e-12
+   20000    1.7357727            0            0    2.4734761 1.9085463e-11
+Loop time of 0.610263 on 1 procs for 20000 steps with 20 atoms
+
+Performance: 707891388.947 tau/day, 32772.749 timesteps/s
+99.6% CPU use with 1 MPI tasks x no OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.0054655  | 0.0054655  | 0.0054655  |   0.0 |  0.90
+Bond    | 0.004477   | 0.004477   | 0.004477   |   0.0 |  0.73
+Neigh   | 0.53335    | 0.53335    | 0.53335    |   0.0 | 87.40
+Comm    | 0.010872   | 0.010872   | 0.010872   |   0.0 |  1.78
+Output  | 0.00049949 | 0.00049949 | 0.00049949 |   0.0 |  0.08
+Modify  | 0.050537   | 0.050537   | 0.050537   |   0.0 |  8.28
+Other   |            | 0.005064   |            |       |  0.83
+
+Nlocal:    20 ave 20 max 20 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:    0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:    10 ave 10 max 10 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 10
+Ave neighs/atom = 0.5
+Ave special neighs/atom = 1
+Neighbor list builds = 2000
+Dangerous builds not checked
+min_style cg
+minimize 0.0001 1e-06 500 500
+WARNING: Resetting reneighboring criteria during minimization (../min.cpp:168)
+Neighbor list info ...
+  1 neighbor list requests
+  update every 1 steps, delay 0 steps, check yes
+  max neighbors/atom: 2000, page size: 40000
+  master list distance cutoff = 400
+  ghost atom cutoff = 400
+  binsize = 200 -> bins = 60 60 60
+Memory usage per processor = 6.92694 Mbytes
+Step Temp E_pair E_mol TotEng Press
+   20000    1.7357727            0            0    2.4734761 1.9085463e-11
+   20001    1.7357727            0            0    2.4734761 1.9085463e-11
+Loop time of 9.799e-05 on 1 procs for 1 steps with 20 atoms
+
+0.0% CPU use with 1 MPI tasks x no OpenMP threads
+
+Minimization stats:
+  Stopping criterion = search direction is not downhill
+  Energy initial, next-to-last, final =
+                     0                  0                  0
+  Force two-norm initial, final = 0 0
+  Force max component initial, final = 0 0
+  Final line search alpha, max atom move = 0 0
+  Iterations, force evaluations = 1 0
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 9.5367e-07 | 9.5367e-07 | 9.5367e-07 |   0.0 |  0.97
+Bond    | 9.5367e-07 | 9.5367e-07 | 9.5367e-07 |   0.0 |  0.97
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 9.5367e-07 | 9.5367e-07 | 9.5367e-07 |   0.0 |  0.97
+Other   |            | 9.513e-05  |            |       | 97.08
+
+Nlocal:    20 ave 20 max 20 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:    0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:    10 ave 10 max 10 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 10
+Ave neighs/atom = 0.5
+Ave special neighs/atom = 1
+Neighbor list builds = 0
+Dangerous builds not checked
+
+Total wall time: 0:00:00

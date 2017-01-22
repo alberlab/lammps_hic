@@ -1,0 +1,27 @@
+units                 lj
+atom_style            bond
+bond_style  hybrid harmonic_upper_bound harmonic_lower_bound
+boundary              f f f
+special_bonds lj/coul 1.0 1.0 1.0
+pair_style lj/cut 200
+read_data input.data
+mass * 1.0
+group beads type != 2
+group dummy type 2
+neighbor 200 bin
+neigh_modify every 10 check yes
+neigh_modify one 2000 page 40000
+fix 1 dummy setforce 0.0 0.0 0.0
+neigh_modify exclude group dummy all check no
+fix 2 beads nve/limit 5.0
+fix 3 beads langevin 20.0 1.0 50.0 38611645
+timestep 0.25
+region mySphere sphere 0.0 0.0 0.0 5200.0
+fix wall beads wall/region mySphere harmonic 10.0 1.0  200
+pair_coeff * * 1.0 178.25311942959
+pair_modify shift yes
+dump   id beads custom 20000 out.lammpstrj id type x y z fx fy fz
+thermo 1000
+run 20000
+min_style cg
+minimize 0.0001 1e-06 500 500
