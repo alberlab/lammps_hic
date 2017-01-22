@@ -2,7 +2,7 @@ import h5py
 import logging
 import numpy as np
 
-from . import io
+from . import myio as io
 
 
 def monitor_progress(routine, async_results, timeout=60):

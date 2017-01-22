@@ -37,4 +37,5 @@ def read_actdist(filename):
     return ad
 
 
-def write_actdist()
+def write_actdist():
+    pass
