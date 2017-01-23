@@ -93,7 +93,7 @@ def _compute_actdist(crd_fname, nstruct, nbead):
     return inner
 
 
-def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_prob, save_to=None):
+def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None):
 
     with h5py.File(crd_fname, 'r') as hss:
         n_struct = hss['nstruct'][()]
@@ -101,15 +101,14 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_pro
 
     to_process = []
 
+    last_prob = {(i, j): d for i, j, d in last_ad}
+
     for i in range(n_bead):
         for j in range(i + 2, n_bead): # skips consecutive beads
             if probability_matrix[i, j] >= theta:
-                if last_prob is not None:
-                    try:
-                        lp = last_prob[(i, j)]
-                    except KeyError:
-                        lp = 0
-                else:
+                try:
+                    lp = last_prob[(i, j)]
+                except KeyError:
                     lp = 0
                 to_process.append((i, j, probability_matrix[i, j], lp))
 

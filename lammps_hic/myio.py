@@ -2,7 +2,7 @@ import numpy as np
 import os.path
 
 
-ACTDIST_TXT_FMT = '%d %d %5f %2f %5f %5f'
+ACTDIST_TXT_FMT = '%6d %6d %.5f %10.2f %.5f %.5f'
 
 
 def read_full_actdist(filename):
