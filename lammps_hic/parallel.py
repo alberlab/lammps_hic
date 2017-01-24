@@ -121,7 +121,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     # in eccessive communication.
     blocks_per_line = 2 * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
     if blocks_per_line > n_bead:
-        blocks_per_line = nbead
+        blocks_per_line = n_bead
     block_size = (n_bead // blocks_per_line) + 1
     blocks = {(i, j): list() for i in range(blocks_per_line) for j in range(i, blocks_per_line)}
     
