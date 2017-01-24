@@ -3,6 +3,7 @@ import os
 import os.path
 import subprocess
 from io import StringIO
+from subprocess import Popen, PIPE
 import shutil
 import h5py
 import numpy as np
@@ -218,12 +219,12 @@ def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
         if isinstance(args['actdist'], str):
             if os.path.getsize(args['actdist']) > 0:
                 actdists = np.genfromtxt(args['actdist'],
-                                         usecols=(0, 1, 3),
-                                         dtype=(int, int, float))
+                                         usecols=(0, 1, 2, 3, 4, 5),
+                                         dtype=(int, int, float, float, float, float))
             else:
                 actdists = []
 
-        for (i, j, d) in actdists:
+        for (i, j, pwish, d, p, pnow) in actdists:
             cd = np.zeros(4)
             rsph = bead_radius + bead_radius
             dcc = d + rsph  # center to center distance
@@ -626,7 +627,7 @@ def lammps_minimize(i, last_hss, new_prefix, **kwargs):
 
     data_fname = '/dev/shm/{}.{}.data'.format(new_prefix, i)
     script_fname = '/dev/shm/{}.{}.lam'.format(new_prefix, i)
-    traj_fname = '/dev/shm/{}.{}.lam'.format(new_prefix, i)
+    traj_fname = '/dev/shm/{}.{}.lammpstrj'.format(new_prefix, i)
 
     try:
         with h5py.File(last_hss, 'r') as f:
@@ -634,34 +635,35 @@ def lammps_minimize(i, last_hss, new_prefix, **kwargs):
             radius = f['radius'][0][()]
             chrom = f['idx'][:][()]
 
+        if len(chrom) == crd.shape[0] // 2:
+            chrom = list(chrom) + list(chrom)
+
         # prepare input
+        opts = {'out': traj_fname, 'data': data_fname, 'lmp': script_fname}
+        kwargs.update(opts)
         generate_input_single_radius(crd, radius, chrom, **kwargs)
 
         # run the lammps minimization
-        output = StringIO()
-        error = StringIO()
         with open(script_fname, 'r') as lamfile:
-            return_code = subprocess.call([lammps_executable,
-                                           '-log', '/dev/null'],
-                                          stdin=lamfile,
-                                          stdout=output,
-                                          stderr=error)
+            proc = Popen([lammps_executable, '-log', '/dev/null'],
+                         stdin=lamfile,
+                         stdout=PIPE,
+                         stderr=PIPE)
+            output, error = proc.communicate()
 
-        if return_code != 0:
-            error_dump = './errs/{}.{}.lammps.err'.format(new_prefix, i)
-            output_dump = './errs/{}.{}.lammps.log'.format(new_prefix, i)
+        if proc.returncode != 0:
+            error_dump = './{}.{}.lammps.err'.format(new_prefix, i)
+            output_dump = './{}.{}.lammps.log'.format(new_prefix, i)
             with open(error_dump, 'w') as fd:
-                error.seek(0)
-                shutil.copyfileobj(error, fd)
+                error_dump.write(error)
 
             with open(output_dump, 'w') as fd:
-                output.seek(0)
-                shutil.copyfileobj(output, fd)
+                output_dump.write(output)
 
             raise RuntimeError('LAMMPS exited with non-zero exit code')
 
         # get results
-        info = get_info_from_log(output)
+        info = get_info_from_log(StringIO(unicode(output)))
         with open(traj_fname, 'r') as fd:
             crd = get_last_frame(fd)
 
