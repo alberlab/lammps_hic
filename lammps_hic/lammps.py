@@ -1,13 +1,14 @@
 from __future__ import print_function, division
 import os
 import os.path
-import subprocess
-from io import StringIO
-from subprocess import Popen, PIPE
-import shutil
 import h5py
 import numpy as np
 from numpy.linalg import norm
+from io import StringIO
+from subprocess import Popen, PIPE
+
+from .myio import read_hss, write_hss
+from .util import monitor_progress
 
 
 lammps_executable = 'lmp_serial_mod'
@@ -620,23 +621,16 @@ def get_last_frame(fh):
     return crds
 
 
-def lammps_minimize(i, last_hss, new_prefix, **kwargs):
+def lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir='/dev/shm', log_dir='.', **kwargs):
     ''' lammps_minimize: calls lammps on files on
     /dev/shm for performance, and checks execution
     result and final energies '''
 
-    data_fname = '/dev/shm/{}.{}.data'.format(new_prefix, i)
-    script_fname = '/dev/shm/{}.{}.lam'.format(new_prefix, i)
-    traj_fname = '/dev/shm/{}.{}.lammpstrj'.format(new_prefix, i)
+    data_fname = '{}/{}.data'.format(tmp_files_dir, crd_id)
+    script_fname = '{}/{}.lam'.format(tmp_files_dir, crd_id)
+    traj_fname = '{}/{}.lammpstrj'.format(tmp_files_dir, crd_id)
 
     try:
-        with h5py.File(last_hss, 'r') as f:
-            crd = f['coordinates'][i, :, :][()]
-            radius = f['radius'][0][()]
-            chrom = f['idx'][:][()]
-
-        if len(chrom) == crd.shape[0] // 2:
-            chrom = list(chrom) + list(chrom)
 
         # prepare input
         opts = {'out': traj_fname, 'data': data_fname, 'lmp': script_fname}
@@ -652,8 +646,8 @@ def lammps_minimize(i, last_hss, new_prefix, **kwargs):
             output, error = proc.communicate()
 
         if proc.returncode != 0:
-            error_dump = './{}.{}.lammps.err'.format(new_prefix, i)
-            output_dump = './{}.{}.lammps.log'.format(new_prefix, i)
+            error_dump = '{}/{}.lammps.err'.format(log_dir, crd_id)
+            output_dump = '{}/{}.lammps.log'.format(log_dir, crd_id)
             with open(error_dump, 'w') as fd:
                 error_dump.write(error)
 
@@ -681,3 +675,37 @@ def lammps_minimize(i, last_hss, new_prefix, **kwargs):
         raise
 
     return crd, info
+
+
+# closure for parallel mapping
+def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', **kwargs):
+    def inner(pargs):
+        crd, crd_id = pargs
+        import numpy as np
+        return lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir, log_dir, **kwargs)
+    return inner
+
+
+def bulk_minimize(parallel_client,
+                  crd_fname,
+                  prefix='minimize',
+                  tmp_files_dir='/dev/shm',
+                  log_dir='.',
+                  **kwargs):
+    crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
+    lbv = parallel_client.load_balanced_view()
+    radius = radii[0]
+    pargs = [(crd[i], prefix + '.' + str(i)) for i in n_struct] 
+    ar = lbv.map_async(parallel_fun(radius, chrom, tmp_files_dir, log_dir, **kwargs),
+                       pargs)
+    monitor_progress('bulk_minimize() - %s' % prefix, ar)
+
+    results = list(ar.get())
+    new_crd = [x[0] for x in results]
+
+    write_hss(prefix + '.hss', new_crd, radii, chrom)
+
+
+    
+
+

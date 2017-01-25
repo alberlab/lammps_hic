@@ -2,22 +2,9 @@ import h5py
 import logging
 import numpy as np
 
+from .myio import read_hss
+from .util import monitor_progress
 
-def pretty_tdelta(seconds):
-    seconds = int(seconds)
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    return "%dh %02dm %02ds" % (h, m, s)
-        
-
-def monitor_progress(routine, async_results, timeout=60):
-    while not async_results.ready():
-        logging.info('%s: completed %d of %d tasks. Time elapsed: %s', 
-                     routine,
-                     async_results.progress,
-                     len(async_results),
-                     pretty_tdelta(async_results.elapsed))
-        async_results.wait(timeout)
 
 
 def _compute_actdist(nstruct, nbead):
@@ -99,15 +86,9 @@ def _compute_actdist(nstruct, nbead):
 
 def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None):
     
-    hss = h5py.File(crd_fname, 'r')
-    n_struct = hss['nstruct'][()]
-    radii = hss['radius'][()]
-    crd = hss['coordinates'][()]
-    
-    n_bead = len(probability_matrix)
-
+    crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
+    n_loci = len(probability_matrix)
     last_prob = {(i, j): p for i, j, pw, d, p, pn in last_ad}
-    
     n_workers = len(parallel_client.ids)
                 
     if n_workers == 0:
@@ -120,13 +101,13 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     # workers. This allows for some balancing but not resulting
     # in eccessive communication.
     blocks_per_line = 2 * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
-    if blocks_per_line > n_bead:
-        blocks_per_line = n_bead
-    block_size = (n_bead // blocks_per_line) + 1
+    if blocks_per_line > n_loci:
+        blocks_per_line = n_loci
+    block_size = (n_loci // blocks_per_line) + 1
     blocks = {(i, j): list() for i in range(blocks_per_line) for j in range(i, blocks_per_line)}
     
-    for i in range(n_bead):
-        for j in range(i + 2, n_bead): # skips consecutive beads
+    for i in range(n_loci):
+        for j in range(i + 2, n_loci): # skips consecutive beads
             if probability_matrix[i, j] >= theta:
                 try:
                     lp = last_prob[(i, j)]
@@ -138,8 +119,8 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     for k in range(blocks_per_line):
         offset1 = k * block_size
         offset2 = k * block_size
-        x1 = crd[:, k * block_size:min((k + 1) * block_size, n_bead), :].transpose((1, 0, 2))
-        x2 = crd[:, k * block_size + n_bead:min((k + 1) * block_size + n_bead, 2*n_bead), :].transpose((1, 0, 2))
+        x1 = crd[:, k * block_size:min((k + 1) * block_size, n_loci), :].transpose((1, 0, 2))
+        x2 = crd[:, k * block_size + n_loci:min((k + 1) * block_size + n_loci, 2*n_loci), :].transpose((1, 0, 2))
         local_data.append({'offset1' : offset1, 'offset2': offset2, 'x1': x1, 'x2': x2})
     
     args = []
@@ -148,17 +129,22 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
             args.append((local_data[bi], local_data[bj], radii, blocks[(bi, bj)]))
     
     lbview = parallel_client.load_balanced_view()
-    async_results = lbview.map_async(_compute_actdist(n_struct, n_bead), args)  # using the closure
+    async_results = lbview.map_async(_compute_actdist(n_struct, n_loci), args)  # using the closure
     
     monitor_progress('get_actdists()', async_results)
         
-    results = []
-    for r in async_results.get():
-        results += r
+    results = list(async_results.get())
         
     if save_to is not None:
         np.savetxt(save_to,
                    results,
                    fmt='%6d %6d %.5f %10.2f %.5f %.5f')  #myio.ACTDIST_TXT_FMT)
 
-    return results, args
+    columns =[('i', int),
+              ('j', int),
+              ('pwish', float),
+              ('actdist', float),
+              ('pclean', float),
+              ('pnow', float)]
+    return np.array(results).view(np.recarray, dtype=columns)
+
