@@ -695,6 +695,9 @@ def bulk_minimize(parallel_client,
                   tmp_files_dir='/dev/shm',
                   log_dir='.',
                   **kwargs):
+    
+    parallel_client[:].use_cloudpickle()
+
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
     lbv = parallel_client.load_balanced_view()
     radius = radii[0]
@@ -714,7 +717,7 @@ def bulk_minimize(parallel_client,
     energies = np.array([x[1]['final-energy'] for x in results])
     
     write_hss(prefix + '.hss', new_crd, radii, chrom)
-    energies.savetxt(prefix + '_energies.dat')
+    np.savetxt(prefix + '_energies.dat', energies)
 
 
     
