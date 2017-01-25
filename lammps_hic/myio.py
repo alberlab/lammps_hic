@@ -45,14 +45,14 @@ def write_actdist():
 
 def read_hss(fname, i=None):
     with h5py.File(fname, 'r') as f:
-        if i == None:
+        if i is None:
             crd = f['coordinates'][:, :, :][()]
         else:
             crd = f['coordinates'][i, :, :][()]
         radii = f['radius'][()]
         chrom = f['idx'][()]
-        n_struct = f['nstruct']
-        n_bead = f['nbead']
+        n_struct = f['nstruct'][()]
+        n_bead = f['nbead'][()]
     return crd, radii, chrom, n_struct, n_bead
 
 

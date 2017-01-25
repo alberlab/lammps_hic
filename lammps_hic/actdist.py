@@ -133,7 +133,9 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     
     monitor_progress('get_actdists()', async_results)
         
-    results = list(async_results.get())
+    results = []
+    for r in async_results.get():
+        results += r
         
     if save_to is not None:
         np.savetxt(save_to,
@@ -146,5 +148,8 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
               ('actdist', float),
               ('pclean', float),
               ('pnow', float)]
-    return np.array(results).view(np.recarray, dtype=columns)
+    
+    return results
+
+    #return np.array(results).view(np.recarray, dtype=columns)
 

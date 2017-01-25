@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import os
 import os.path
 import h5py
+import logging
 import numpy as np
 from numpy.linalg import norm
 from io import StringIO
@@ -224,6 +225,8 @@ def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
                                          dtype=(int, int, float, float, float, float))
             else:
                 actdists = []
+        else:
+            actdists = args['actdist']
 
         for (i, j, pwish, d, p, pnow) in actdists:
             cd = np.zeros(4)
@@ -695,15 +698,23 @@ def bulk_minimize(parallel_client,
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
     lbv = parallel_client.load_balanced_view()
     radius = radii[0]
-    pargs = [(crd[i], prefix + '.' + str(i)) for i in n_struct] 
+    pargs = [(crd[i], prefix + '.' + str(i)) for i in range(n_struct)] 
+
+    logging.info('bulk_minimize(): Starting bulk minimization of %d structures' % n_struct)
+
     ar = lbv.map_async(parallel_fun(radius, chrom, tmp_files_dir, log_dir, **kwargs),
                        pargs)
+
     monitor_progress('bulk_minimize() - %s' % prefix, ar)
 
-    results = list(ar.get())
-    new_crd = [x[0] for x in results]
+    logging.info('bulk_minimize(): Done')
 
+    results = list(ar.get())
+    new_crd = np.array([x[0] for x in results])
+    energies = np.array([x[1]['final-energy'] for x in results])
+    
     write_hss(prefix + '.hss', new_crd, radii, chrom)
+    energies.savetxt(prefix + '_energies.dat')
 
 
     

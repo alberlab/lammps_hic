@@ -4,6 +4,13 @@ Guido Polles <guido.polles@gmail.com>
 This is my module for performing Population Modeling from HiC data using LAMMPS.
 The lammps_hic module is based on ipyparallel. The UI -if ever- will be based
 on Tornado (as a web interface).
+Needs:
+numpy
+h5py
+cloudpickle
+ipyparallel
+tornado
+
 
 Sub-modules:
 
