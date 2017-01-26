@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import os
 import os.path
 import h5py
+import math
 import logging
 import numpy as np
 from numpy.linalg import norm
@@ -42,13 +43,13 @@ ARG_DEFAULT = {
     'thermo': 1000,
     'max_velocity': 5.0,
     'evfactor': 1.0,
-    'soft_min': 0,
     'max_neigh': 2000,
     'max_cg_iter': 500,
     'max_cg_eval': 500,
     'etol': 1e-4,
     'ftol': 1e-6,
     'territories': False,
+    'soft_min': 0
 }
 
 
@@ -66,6 +67,15 @@ class BondType(object):
                                     self.kspring,
                                     self.r0)
 
+    def __eq__(self, other): 
+        return (self.r0 == other.r0 and
+                self.kspring == other.kspring and
+                self.type_str == other.type_str)  
+
+
+    def __hash__(self):
+        return hash((self.r0, self.kspring, self.type_str))
+
 
 class Bond(object):
 
@@ -81,20 +91,36 @@ class Bond(object):
                                     self.i + 1,
                                     self.j + 1)
 
+    def __eq__(self, other): 
+        return self.__dict__ == other.__dict__
+
+
 
 class BondContainer(object):
-
+    '''pretty much a container to avoid keeping track of ids
+    the dictionary for the types is to avoid re-use of 
+    bond_types, for example for beads of the same type.
+    This way, the check should be amortized O(1)'''
+    
     def __init__(self):
         self.bond_types = []
         self.bonds = []
+        self.bond_type_dict = {}
 
-    def add_type(self, type_str, kspring, r0):
+    def add_type(self, type_str, kspring=0.0, r0=0.0):
+
         bt = BondType(len(self.bond_types),
                       type_str,
                       kspring,
                       r0)
-        self.bond_types.append(bt)
-        return bt
+
+        old_id = self.bond_type_dict.get(bt)
+        if old_id is None:
+            self.bond_types.append(bt)
+            self.bond_type_dict[bt] = len(self.bond_types)
+            return bt
+        else: 
+            return self.bond_types[old_id - 1]
 
     def add_bond(self, bond_type, i, j):
         bond = Bond(len(self.bonds),
@@ -202,7 +228,7 @@ def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
         chrom_start.append(n_atoms)
         for k in range(len(chrom_start) - 1):
             chrom_len = chrom_start[k + 1] - chrom_start[k]
-            d = 2.0 * bead_radius
+            d = 4.0 * bead_radius
             d *= (float(chrom_len) / terr_occupancy)**(1. / 3)
             bt = bond_list.add_type('harmonic_upper_bound',
                                     kspring=1.0,
@@ -534,6 +560,428 @@ def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
               file=f)
 
         print('pair_modify shift yes', file=f)
+
+        # outputs:
+        print('dump   id beads custom',
+              args['write'],
+              args['out'],
+              'id type x y z fx fy fz', file=f)
+        print('thermo', args['thermo'], file=f)
+
+        # Run MD
+        print('run', args['mdsteps'], file=f)
+
+        # Run CG
+        print('min_style cg', file=f)
+        print('minimize', args['etol'], args['ftol'],
+              args['max_cg_iter'], args['max_cg_eval'], file=f)
+
+
+def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
+    ''' from coordinates of the beads, their radii
+    and the list of relative chrmosomes, it constructs the
+    input files for running a minimization. Has various arguments,
+    the ones in the ARG_DEFAULT dictionary. This is a quite long
+    function, performing the parsing and the output. '''
+
+    args = {k: v for k, v in ARG_DEFAULT.items()}
+    for k, v in kwargs.items():
+        if v is not None:
+            args[k] = v
+
+    if args['write'] is None:
+        args['write'] = args['mdsteps']  # write only final step
+
+    chromid = _chromosome_string_to_numeric_id(chrom)
+
+    n_hapl = len(crd) // 2
+    n_atoms = len(crd)
+    x1 = crd[:n_hapl]
+    x2 = crd[n_hapl:]
+    assert (len(x1) == len(x2))
+
+    # Harmonic Upper Bond Coefficients are one for each bond type
+    # and coded as:
+    #   Bond_type_id kspring activation_distance
+    # Each bond is coded as:
+    #   Bond_id Bond_type_id ibead jbead
+
+    bond_list = BondContainer()
+    dummies = DummyAtoms(n_atoms)
+
+    # first, determine atom types by radius
+    atom_types_ids = {}
+    at = 0
+    atom_types = np.empty(n_atoms, dtype=int)
+    for i, r in enumerate(bead_radii):
+        aid = atom_types_ids.get(r)
+        if aid == None:
+            at += 1
+            atom_types_ids[r] = at
+            aid = at
+        atom_types[i] = aid
+    n_bead_types = len(atom_types_ids)
+
+    ###############################
+    # Add consecutive beads bonds #
+    ###############################
+
+    for i in range(n_atoms - 1):
+        if chrom[i] == chrom[i + 1]:
+            bt = bond_list.add_type('harmonic_upper_bound', 
+                                    kspring=1.0, 
+                                    r0=2*(bead_radii[i]+bead_radii[i+1]))
+            bond_list.add_bond(bt, i, i + 1)
+
+    ##############################
+    # Add chromosome territories #
+    ##############################
+
+    if args['territories']:
+        # for the territories step we want to make chromosomes very dense (3x?)
+        terr_occupancy = args['occupancy'] * 3
+        chrom_start = [0]
+        for i in range(1, n_atoms):
+            if chrom[i] != chrom[i - 1]:
+                chrom_start.append(i)
+        chrom_start.append(n_atoms)
+        for k in range(len(chrom_start) - 1):
+            chrom_len = chrom_start[k + 1] - chrom_start[k]
+            chr_radii = bead_radii[chrom_start[k]:chrom_start[k + 1]]
+            d = 4.0 * sum(chr_radii) / chrom_len  # 4 times the average radius
+            d *= (float(chrom_len) / terr_occupancy)**(1. / 3)
+            bt = bond_list.add_type('harmonic_upper_bound',
+                                    kspring=1.0,
+                                    r0=d)
+            for i in range(chrom_start[k], chrom_start[k + 1]):
+                for j in range(i + 1, chrom_start[k + 1]):
+                    bond_list.add_bond(bt, i, j)
+
+    ##############################################
+    # Activation distance for contact restraints #
+    ##############################################
+    # NOTE: activation distances are surface to surface, not center to center
+    # The old method was using minimum pairs
+    # Here we enforce a single pair.
+    if args['actdist'] is not None:
+        if isinstance(args['actdist'], str):
+            if os.path.getsize(args['actdist']) > 0:
+                actdists = np.genfromtxt(args['actdist'],
+                                         usecols=(0, 1, 2, 3, 4, 5),
+                                         dtype=(int, int, float, float, float, float))
+            else:
+                actdists = []
+        else:
+            actdists = args['actdist']
+
+        for (i, j, pwish, d, p, pnow) in actdists:
+            cd = np.zeros(4)
+            rsph = bead_radii[i] + bead_radii[j]
+            dcc = d + rsph  # center to center distance
+
+            cd[0] = norm(x1[i] - x1[j])
+            cd[1] = norm(x2[i] - x2[j])
+            cd[2] = norm(x1[i] - x2[j])
+            cd[3] = norm(x2[i] - x1[j])
+
+            # find closest distance and remove incompatible contacts
+            idx = np.argsort(cd)
+
+            if cd[idx[0]] > dcc:
+                continue
+
+            # we have at least one bond to enforce
+            bt = bond_list.add_type('harmonic_upper_bound',
+                                    kspring=args['contact_kspring'],
+                                    r0=args['contact_range'] * rsph)
+
+            if idx[0] == 0 or idx[0] == 1:
+                cd[2] = np.inf
+                cd[3] = np.inf
+            else:
+                cd[0] = np.inf
+                cd[1] = np.inf
+
+            # add bonds
+            if cd[0] < dcc:
+                bond_list.add_bond(bt, i, j)
+            if cd[1] < dcc:
+                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
+            if cd[2] < dcc:
+                bond_list.add_bond(bt, i, j + n_hapl)
+            if cd[3] < dcc:
+                bond_list.add_bond(bt, i + n_hapl, j)
+
+    #############################################
+    # Activation distances for damid restraints #
+    #############################################
+
+    if args['damid'] is not None:
+        if isinstance(args['damid'], str):
+            if os.path.getsize(args['damid']) > 0:
+                damid_actdists = np.genfromtxt(args['damid'],
+                                               usecols=(0, 1, 2),
+                                               dtype=(int, float, float))
+                if damid_actdists.shape == ():
+                    damid_actdists = [damid_actdists]
+            else:
+                damid_actdists = []
+
+        for item in damid_actdists:
+            i = item[0]
+            d = item[2]
+            # target minimum distance
+            td = args['nucleus_radius'] - (2 * bead_radii[i])
+
+            # current distances
+            cd = np.zeros(2)
+            cd[0] = args['nucleus_radius'] - norm(x1[i])
+            cd[1] = args['nucleus_radius'] - norm(x2[i])
+
+            idx = np.argsort(cd)
+
+            if cd[idx[0]] > d:
+                continue
+
+            # we have at least one bond to enforce
+            bt = bond_list.add_type('harmonic_lower_bound',
+                                    kspring=args['damid_kspring'],
+                                    r0=td)
+
+            # add bonds
+            if cd[0] < d:
+                bond_list.add_bond(bt, i, dummies.next())
+            if cd[1] < d:
+                bond_list.add_bond(bt, i + n_hapl, dummies.next())
+
+    ###############################################
+    # Add bonds for fish restraints, if specified #
+    ###############################################
+
+    if args['fish'] is not None:
+        hff = h5py.File(args['fish'], 'r')
+        minradial = 'r' in args['fish_type']
+        maxradial = 'R' in args['fish_type']
+        minpair = 'p' in args['fish_type']
+        maxpair = 'P' in args['fish_type']
+
+        if minradial:
+            cd = np.zeros(2)
+            probes = hff['probes']
+            minradial_dist = hff['radial_min'][:, args['i']]
+            for k, i in enumerate(probes):
+                td = minradial_dist[k]
+                cd[0] = norm(x1[i])
+                cd[1] = norm(x2[i])
+                if cd[0] < cd[1]:
+                    ii = i
+                else:
+                    ii = i + n_hapl
+                bt = bond_list.add_type('harmonic_lower_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=max(0, td - args['fish_tol']))
+                bond_list.add_bond(bt, ii, dummies.next())
+                bt = bond_list.add_type('harmonic_upper_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=td + args['fish_tol'])
+                bond_list.add_bond(bt, ii, dummies.next())
+
+        if maxradial:
+            cd = np.zeros(2)
+            probes = hff['probes']
+            maxradial_dist = hff['radial_max'][:, args['i']]
+            for k, i in enumerate(probes):
+                td = maxradial_dist[k]
+                cd[0] = norm(x1[i])
+                cd[1] = norm(x2[i])
+                if cd[0] > cd[1]:
+                    ii = i
+                else:
+                    ii = i + n_hapl
+                bt = bond_list.add_type('harmonic_upper_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=td + args['fish_tol'])
+                bond_list.add_bond(bt, ii, dummies.next())
+                bt = bond_list.add_type('harmonic_lower_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=max(0, td - args['fish_tol']))
+                bond_list.add_bond(bt, ii, dummies.next())
+
+        if minpair:
+            pairs = hff['pairs']
+            minpair_dist = hff['pair_min'][:, args['i']]
+            for k, (i, j) in enumerate(pairs):
+                dmin = minpair_dist[k]
+
+                cd = np.zeros(4)
+                cd[0] = norm(x1[i] - x1[j])
+                cd[1] = norm(x2[i] - x2[j])
+                cd[2] = norm(x1[i] - x2[j])
+                cd[3] = norm(x2[i] - x1[j])
+
+                bt = bond_list.add_type('harmonic_lower_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=max(0, dmin - args['fish_tol']))
+                bond_list.add_bond(bt, i, j)
+                bond_list.add_bond(bt, i, j + n_hapl)
+                bond_list.add_bond(bt, i + n_hapl, j)
+                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
+
+                bt = bond_list.add_type('harmonic_upper_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=dmin + args['fish_tol'])
+                idx = np.argsort(cd)
+
+                if idx[0] == 0 or idx[0] == 2:
+                    ii = i
+                else:
+                    ii = i + n_hapl
+                if idx[0] == 0 or idx[0] == 3:
+                    jj = j
+                else:
+                    jj = j + n_hapl
+                bond_list.add_bond(bt, ii, jj)
+
+        if maxpair:
+            pairs = hff['pairs']
+            maxpair_dist = hff['pair_max'][:, args['i']]
+            for k, (i, j) in enumerate(pairs):
+                dmax = maxpair_dist[k]
+
+                cd = np.zeros(4)
+                cd[0] = norm(x1[i] - x1[j])
+                cd[1] = norm(x2[i] - x2[j])
+                cd[2] = norm(x1[i] - x2[j])
+                cd[3] = norm(x2[i] - x1[j])
+
+                bt = bond_list.add_type('harmonic_upper_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=dmax + args['fish_tol'])
+                bond_list.add_bond(bt, i, j)
+                bond_list.add_bond(bt, i, j + n_hapl)
+                bond_list.add_bond(bt, i + n_hapl, j)
+                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
+
+                bt = bond_list.add_type('harmonic_lower_bound',
+                                        kspring=args['fish_kspring'],
+                                        r0=max(0, dmax - args['fish_tol']))
+                idx = np.argsort(cd)
+                if idx[-1] == 0 or idx[-1] == 2:
+                    ii = i
+                else:
+                    ii = i + n_hapl
+                if idx[-1] == 0 or idx[-1] == 3:
+                    jj = j
+                else:
+                    jj = j + n_hapl
+                bond_list.add_bond(bt, ii, jj)
+        hff.close()
+
+    ############################
+    # Create LAMMPS input file #
+    ############################
+
+    n_bonds = len(bond_list.bonds)
+    n_bondtypes = len(bond_list.bond_types)
+    dummy_type = n_bead_types + 1
+
+    with open(args['data'], 'w') as f:
+
+        print('LAMMPS input\n', file=f)
+
+        print(n_atoms + dummies.n_dummy, 'atoms\n', file=f)
+        print(n_bead_types + 1, 'atom types\n', file=f)
+        print(n_bondtypes, 'bond types\n', file=f)
+        print(n_bonds, 'bonds\n', file=f)
+
+        # keeping some free space to be sure
+        print('-6000 6000 xlo xhi\n',
+              '-6000 6000 ylo yhi\n',
+              '-6000 6000 zlo zhi', file=f)
+
+        print('\nAtoms\n', file=f)
+        # index, molecule, atom type, x y z.
+        for i, (x, y, z) in enumerate(crd):
+            print(i + 1, chromid[i], atom_types[i], x, y, z, file=f)
+        
+        # dummy atoms in the middle
+        dummy_mol = max(chromid) + 1
+        for i in range(dummies.n_dummy):
+            print(n_atoms + i + 1, dummy_mol, dummy_type, 0, 0, 0, file=f)
+
+        print('\nBond Coeffs\n', file=f)
+        for bc in bond_list.bond_types:
+            print(bc, file=f)
+
+        print('\nBonds\n', file=f)
+        for b in bond_list.bonds:
+            print(b, file=f)
+
+        # Excluded volume coefficients
+        at_radii = [x for x in sorted(atom_types_ids, key=atom_types_ids.__getitem__)]
+
+        print('\nPairIJ Coeffs\n', file=f)
+        for i, ri in enumerate(at_radii):
+            for j in range(i, len(at_radii)):
+                rj = at_radii[j] 
+                dc = (ri + rj)
+                A = (dc/math.pi)**2
+                #sigma = dc / 1.1224 #(2**(1.0/6.0))
+                #print(i+1, args['evfactor'], sigma, dc, file=f)
+                print(i+1, j+1, A*args['evfactor'], dc, file=f)
+        
+        for i in range(len(at_radii) + 1):
+            print(i+1, dummy_type, 0, 0, file=f)
+
+    ##########################
+    # Create lmp script file #
+    ##########################
+
+    with open(args['lmp'], 'w') as f:
+        print('units                 lj', file=f)
+        print('atom_style            bond', file=f)
+        print('bond_style  hybrid',
+              'harmonic_upper_bound',
+              'harmonic_lower_bound', file=f)
+        print('boundary              f f f', file=f)
+
+        # Needed to avoid calculation of 3 neighs and 4 neighs
+        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
+
+        # excluded volume
+        print('pair_style soft', 2.0 * max(bead_radii), file=f)  # global cutoff
+
+        print('read_data', args['data'], file=f)
+        print('mass * 1.0', file=f)
+
+        print('group beads type !=', dummy_type, file=f)
+        print('group dummy type', dummy_type, file=f)
+
+        print('neighbor', max(bead_radii), 'bin', file=f)  # skin size
+        print('neigh_modify every 1 check yes', file=f)
+        print('neigh_modify one', args['max_neigh'],
+              'page', 20 * args['max_neigh'], file=f)
+
+        # Freeze dummy atom
+
+        print('neigh_modify exclude group dummy all', file=f)
+        print('fix 1 dummy setforce 0.0 0.0 0.0', file=f)
+
+        # Integration
+        # select the integrator
+        print('fix 2 beads nve/limit', args['max_velocity'], file=f)
+        # Impose a thermostat - Tstart Tstop tau_decorr seed
+        print('fix 3 beads langevin', args['tstart'], args['tstop'],
+              args['damp'], args['seed'], file=f)
+        print('timestep', args['timestep'], file=f)
+
+        # Region
+        print('region mySphere sphere 0.0 0.0 0.0',
+              args['nucleus_radius'] + 2 * max(bead_radii), file=f)
+        print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
+              2 * max(bead_radii), file=f)
+
+        #print('pair_modify shift yes mix arithmetic', file=f)
 
         # outputs:
         print('dump   id beads custom',
