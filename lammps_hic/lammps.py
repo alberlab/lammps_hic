@@ -8,12 +8,18 @@ import numpy as np
 from numpy.linalg import norm
 from io import StringIO
 from subprocess import Popen, PIPE
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
 
 from .myio import read_hss, write_hss
 from .util import monitor_progress
 
 
 lammps_executable = 'lmp_serial_mod'
+float_epsilon = 1e-2
 
 
 ARG_DEFAULT = {
@@ -54,7 +60,9 @@ ARG_DEFAULT = {
 
 
 class BondType(object):
-
+    '''A bond type. The indexes are saved in
+    the 0, N-1 index, while the string is in the 1..N lammps
+    format.'''
     def __init__(self, b_id, type_str, kspring, r0):
         self.id = b_id
         self.kspring = kspring
@@ -78,7 +86,9 @@ class BondType(object):
 
 
 class Bond(object):
-
+    '''A bond between two atoms. The indexes are saved in
+    the 0, N-1 index, while the string is in the 1..N lammps
+    format.'''
     def __init__(self, b_id, bond_type, i, j):
         self.id = b_id
         self.bond_type = bond_type
@@ -95,11 +105,10 @@ class Bond(object):
         return self.__dict__ == other.__dict__
 
 
-
 class BondContainer(object):
-    '''pretty much a container to avoid keeping track of ids
-    the dictionary for the types is to avoid re-use of 
-    bond_types, for example for beads of the same type.
+    '''A container to avoid keeping track of ids and duplicates.
+    The dictionary for the types is to avoid re-use of 
+    bond_types.
     This way, the check should be amortized O(1)'''
     
     def __init__(self):
@@ -117,10 +126,10 @@ class BondContainer(object):
         old_id = self.bond_type_dict.get(bt)
         if old_id is None:
             self.bond_types.append(bt)
-            self.bond_type_dict[bt] = len(self.bond_types)
+            self.bond_type_dict[bt] = bt.id
             return bt
         else: 
-            return self.bond_types[old_id - 1]
+            return self.bond_types[old_id]
 
     def add_bond(self, bond_type, i, j):
         bond = Bond(len(self.bonds),
@@ -153,8 +162,9 @@ class DummyAtoms(object):
 
 
 def _chromosome_string_to_numeric_id(chrom):
-    ''' transform a list of strings in numeric
-    ids (from 1 to N) '''
+    '''Transform a list of strings in numeric
+    ids (from 1 to N). Multiple chromosome copies
+    will have the same id'''
     chr_map = {}
     chrom_id = []
     hv = 0
@@ -578,11 +588,12 @@ def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
 
 
 def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
-    ''' from coordinates of the beads, their radii
+    '''From coordinates of the beads, their radii
     and the list of relative chrmosomes, it constructs the
     input files for running a minimization. Has various arguments,
     the ones in the ARG_DEFAULT dictionary. This is a quite long
     function, performing the parsing and the output. '''
+    import numpy as np
 
     args = {k: v for k, v in ARG_DEFAULT.items()}
     for k, v in kwargs.items():
@@ -948,6 +959,7 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
         # Needed to avoid calculation of 3 neighs and 4 neighs
         print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
 
+
         # excluded volume
         print('pair_style soft', 2.0 * max(bead_radii), file=f)  # global cutoff
 
@@ -988,6 +1000,9 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
               args['write'],
               args['out'],
               'id type x y z fx fy fz', file=f)
+
+        # Thermodynamic info style for output
+        print('thermo_style custom step temp epair ebond', file=f)
         print('thermo', args['thermo'], file=f)
 
         # Run MD
@@ -997,6 +1012,26 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
         print('min_style cg', file=f)
         print('minimize', args['etol'], args['ftol'],
               args['max_cg_iter'], args['max_cg_eval'], file=f)
+
+    return bond_list
+
+
+def check_violations(bond_list, crd):
+    violations = []
+    for bond in bond_list.bonds:
+        bt = bond_list.bond_types[bond.bond_type]
+        d = norm(crd[bond.i] - crd[bond.j])
+        if bt.type_str == 'harmonic_upper_bound':
+            if d > bt.r0:
+                absv = d - bt.r0
+                relv = (d - bt.r0) / bt.r0
+                violations.append((absv, relv, bt))
+        if bt.type_str == 'harmonic_lower_bound':
+            if d < bt.r0:
+                absv = bt.r0 - d
+                relv = (bt.r0 - d) / bt.r0
+                violations.append((absv, relv, bt))
+    return violations
 
 
 def _reverse_readline(fh, buf_size=8192):
@@ -1032,15 +1067,25 @@ def _reverse_readline(fh, buf_size=8192):
 
 
 def get_info_from_log(output):
-    ''' gets only the final energy.
+    ''' gets final energy, excluded volume energy and bond energy.
     TODO: get more info? '''
     info = {}
     generator = _reverse_readline(output)
+
     for l in generator:
         if l[:9] == '  Force t':
             ll = next(generator)
             info['final-energy'] = float(ll.split()[2])
             break
+
+    for l in generator:
+        if l[:4] == 'Loop':
+            ll = next(generator)
+            _, _, epair, ebond = [float(s) for s in ll.split()]
+            info['pair-energy'] = epair
+            info['bond-energy'] = ebond
+            break
+    
     # EN=`grep -A 1 "Energy initial, next-to-last, final =" $LAMMPSLOGTMP \
     # | tail -1 | awk '{print $3}'`
     return info
@@ -1072,21 +1117,21 @@ def get_last_frame(fh):
     return crds
 
 
-def lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir='/dev/shm', log_dir='.', **kwargs):
+def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations_=True, **kwargs):
     ''' lammps_minimize: calls lammps on files on
     /dev/shm for performance, and checks execution
     result and final energies '''
 
-    data_fname = '{}/{}.data'.format(tmp_files_dir, crd_id)
-    script_fname = '{}/{}.lam'.format(tmp_files_dir, crd_id)
-    traj_fname = '{}/{}.lammpstrj'.format(tmp_files_dir, crd_id)
+    data_fname = '{}/{}.data'.format(tmp_files_dir, run_name)
+    script_fname = '{}/{}.lam'.format(tmp_files_dir, run_name)
+    traj_fname = '{}/{}.lammpstrj'.format(tmp_files_dir, run_name)
 
     try:
 
         # prepare input
         opts = {'out': traj_fname, 'data': data_fname, 'lmp': script_fname}
         kwargs.update(opts)
-        generate_input_single_radius(crd, radius, chrom, **kwargs)
+        bond_list = generate_input_multiple_radius(crd, radii, chrom, **kwargs)
 
         # run the lammps minimization
         with open(script_fname, 'r') as lamfile:
@@ -1097,24 +1142,27 @@ def lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir='/dev/shm', log_di
             output, error = proc.communicate()
 
         if proc.returncode != 0:
-            error_dump = '{}/{}.lammps.err'.format(log_dir, crd_id)
-            output_dump = '{}/{}.lammps.log'.format(log_dir, crd_id)
+            error_dump = '{}/{}.lammps.err'.format(log_dir, run_name)
+            output_dump = '{}/{}.lammps.log'.format(log_dir, run_name)
             with open(error_dump, 'w') as fd:
-                error_dump.write(error)
+                fd.write(error)
 
             with open(output_dump, 'w') as fd:
-                output_dump.write(output)
+                fd.write(output)
 
             raise RuntimeError('LAMMPS exited with non-zero exit code')
 
         # get results
         info = get_info_from_log(StringIO(unicode(output)))
         with open(traj_fname, 'r') as fd:
-            crd = get_last_frame(fd)
+            new_crd = get_last_frame(fd)
 
-        os.remove(data_fname)
-        os.remove(script_fname)
-        os.remove(traj_fname)
+        if os.path.isfile(data_fname):
+            os.remove(data_fname)
+        if os.path.isfile(script_fname):
+            os.remove(script_fname)
+        if os.path.isfile(traj_fname):
+            os.remove(traj_fname)
 
     except:
         if os.path.isfile(data_fname):
@@ -1125,15 +1173,33 @@ def lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir='/dev/shm', log_di
             os.remove(traj_fname)
         raise
 
-    return crd, info
+
+    if check_violations_:
+        if info['bond-energy'] > float_epsilon:
+            violations = check_violations(bond_list, new_crd)
+        else: 
+            violations = []
+        return new_crd, info, violations
+    else:
+        return new_crd, info, []
 
 
 # closure for parallel mapping
-def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', **kwargs):
+def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_violations_=True, **kwargs):
     def inner(pargs):
-        crd, crd_id = pargs
-        import numpy as np
-        return lammps_minimize(crd, radius, chrom, crd_id, tmp_files_dir, log_dir, **kwargs)
+        try:
+            crd, run_name = pargs
+            return lammps_minimize(crd,
+                                   radius,
+                                   chrom,
+                                   run_name,
+                                   tmp_files_dir=tmp_files_dir,
+                                   log_dir=log_dir,
+                                   check_violations_=check_violations_,
+                                   **kwargs)
+        except:
+            import sys
+            return (None, str(sys.exc_info()))
     return inner
 
 
@@ -1142,30 +1208,67 @@ def bulk_minimize(parallel_client,
                   prefix='minimize',
                   tmp_files_dir='/dev/shm',
                   log_dir='.',
+                  check_violations_=True,
+                  restart=None,
                   **kwargs):
     
+
+    engine_ids = list(parallel_client.ids)
     parallel_client[:].use_cloudpickle()
 
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
-    lbv = parallel_client.load_balanced_view()
-    radius = radii[0]
-    pargs = [(crd[i], prefix + '.' + str(i)) for i in range(n_struct)] 
+    
+    lbv = parallel_client.load_balanced_view(engine_ids)
 
-    logging.info('bulk_minimize(): Starting bulk minimization of %d structures' % n_struct)
+    if restart is None:
+        to_minimize = list(range(n_struct))
+        completed = []
+    else:
+        with open(prefix + '.incomplete.pickle', 'rb') as pf:
+            completed, errors = pickle.load(pf)
+            to_minimize = [i for i, e in errors]
 
-    ar = lbv.map_async(parallel_fun(radius, chrom, tmp_files_dir, log_dir, **kwargs),
-                       pargs)
+    pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
+    f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations_=check_violations_, **kwargs)
+    
+    logging.info('bulk_minimize(): Starting bulk minimization of %d structures' % len(to_minimize))
+
+    ar = lbv.map_async(f, pargs)
 
     monitor_progress('bulk_minimize() - %s' % prefix, ar)
 
     logging.info('bulk_minimize(): Done')
 
     results = list(ar.get())
-    new_crd = np.array([x[0] for x in results])
-    energies = np.array([x[1]['final-energy'] for x in results])
+
+    errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
+    completed += [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
+    completed = list(sorted(completed))
+
+    if len(errors):
+        for i, e in errors:
+            logging.error('Exception returned in minimizing structure %d: %s', i, e)
+        logging.info('Saving partial results to %s.incomplete.pickle')
+        with open(prefix + '.incomplete.pickle', 'wb') as pf:
+            pickle.dump((completed, errors), pf, pickle.HIGHEST_PROTOCOL)
+        raise RuntimeError('Unable to complete bulk_minimize()')
+
+    # We finished lammps runs here
+    new_crd = np.array([x for i, (x, _, _) in completed])
+
+    if restart is not None:
+        os.remove(prefix + '.incomplete.pickle')
+
+    energies = np.array([info['final-energy'] for i, (_, info, _) in completed])
+    violated = [(i, info, violations) for i, (_, info, violations) in completed if len(violations)]
+    n_violated = len(violated)
+    logging.info('%d structures with violations over %d structures',
+                 n_violated,
+                 len(completed))
     
     write_hss(prefix + '.hss', new_crd, radii, chrom)
     np.savetxt(prefix + '_energies.dat', energies)
+    return completed
 
 
     
