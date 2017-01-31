@@ -6,7 +6,6 @@ from .myio import read_hss
 from .util import monitor_progress
 
 
-
 def _compute_actdist(nstruct, nbead):
     '''Calculate actdist closure. Returns a function,
     taking as arguments i, j, pwish, plast.
@@ -85,22 +84,26 @@ def _compute_actdist(nstruct, nbead):
 
 
 def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None):
+
+    logger = logging.getLogger(__name__)
     
+    logger.info('Starting contact activation distance job on %s, p = %.3f', crd_fname, theta)
+
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
     n_loci = len(probability_matrix)
     last_prob = {(i, j): p for i, j, pw, d, p, pn in last_ad}
     n_workers = len(parallel_client.ids)
                 
     if n_workers == 0:
-        logging.error('get_actdists(): No Engines Registered')
+        logger.error('get_actdists(): No Engines Registered')
         raise RuntimeError('get_actdists(): No Engines Registered')
     
     # heuristic to have reasonably small communication but
     # using all the workers. We subdivide in blocks the i, j
-    # matrix, such that the blocks are ~4 times the number of 
+    # matrix, such that the blocks are ~10 times the number of 
     # workers. This allows for some balancing but not resulting
     # in eccessive communication.
-    blocks_per_line = 2 * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
+    blocks_per_line = 3 * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
     if blocks_per_line > n_loci:
         blocks_per_line = n_loci
     block_size = (n_loci // blocks_per_line) + 1
@@ -126,7 +129,8 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     args = []
     for bi in range(blocks_per_line):
         for bj in range(bi, blocks_per_line):
-            args.append((local_data[bi], local_data[bj], radii, blocks[(bi, bj)]))
+            if len(blocks[(bi, bj)]) > 0:
+                args.append((local_data[bi], local_data[bj], radii, blocks[(bi, bj)]))
     
     lbview = parallel_client.load_balanced_view()
     async_results = lbview.map_async(_compute_actdist(n_struct, n_loci), args)  # using the closure
@@ -148,8 +152,8 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
               ('actdist', float),
               ('pclean', float),
               ('pnow', float)]
-    
-    return results
 
-    #return np.array(results).view(np.recarray, dtype=columns)
+    logger.info('Done with contact activation distance job on %s, p = %.3f', crd_fname, theta)
+    
+    return np.array(results, dtype=columns).view(np.recarray)
 

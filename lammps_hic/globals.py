@@ -7,3 +7,6 @@ float_epsilon = 1e-2
 
 # how often print the status of async parallel jobs
 async_check_timeout = 60
+
+#format for logger
+log_fmt = '%(asctime)s %(levelname)s:%(message)s'

@@ -1,5 +1,5 @@
 import logging
-from globals import async_check_timeout
+from .globals import async_check_timeout
 
 
 def pretty_tdelta(seconds):
@@ -10,10 +10,12 @@ def pretty_tdelta(seconds):
         
 
 def monitor_progress(routine, async_results, timeout=async_check_timeout):
+    logger = logging.getLogger(__name__)
+    logger.debug('monitor_progress(): checking %s every %d seconds.', routine, timeout)
     while not async_results.ready():
-        logging.info('%s: completed %d of %d tasks. Time elapsed: %s', 
-                     routine,
-                     async_results.progress,
-                     len(async_results),
-                     pretty_tdelta(async_results.elapsed))
+        logger.info('%s: completed %d of %d tasks. Time elapsed: %s', 
+                    routine,
+                    async_results.progress,
+                    len(async_results),
+                    pretty_tdelta(async_results.elapsed))
         async_results.wait(timeout)

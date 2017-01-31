@@ -16,10 +16,7 @@ except ImportError:
 
 from .myio import read_hss, write_hss
 from .util import monitor_progress
-
-
-lammps_executable = 'lmp_serial_mod'
-float_epsilon = 1e-2
+from .globals import lammps_executable, float_epsilon
 
 
 ARG_DEFAULT = {
@@ -1212,64 +1209,76 @@ def bulk_minimize(parallel_client,
                   restart=None,
                   **kwargs):
     
+    try:
+        logger = logging.getLogger(__name__)
 
-    engine_ids = list(parallel_client.ids)
-    parallel_client[:].use_cloudpickle()
+        logger.debug('bulk_minimize() entry')
 
-    crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
+        engine_ids = list(parallel_client.ids)
+        parallel_client[:].use_cloudpickle()
+
+        logger.debug('bulk_minimize(): reading data')
+        crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
+        logger.debug('bulk_minimize(): done reading data')
+
+        lbv = parallel_client.load_balanced_view(engine_ids)
+
+        if restart is None:
+            to_minimize = list(range(n_struct))
+            completed = []
+        else:
+            with open(prefix + '.incomplete.pickle', 'rb') as pf:
+                completed, errors = pickle.load(pf)
+                to_minimize = [i for i, e in errors]
+
+        logger.debug('bulk_minimize(): preparing arguments and function')
+        pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
+        f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations_=check_violations_, **kwargs)
+        
+        logger.info('bulk_minimize(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
+
+        ar = lbv.map_async(f, pargs)
+
+        logger.debug('bulk_minimize(): map_async sent.')
+
+        monitor_progress('bulk_minimize() - %s' % prefix, ar)
+
+        logger.info('bulk_minimize(): Done')
+
+        results = list(ar.get())
+
+        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
+        completed += [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
+        completed = list(sorted(completed))
+
+        if len(errors):
+            for i, e in errors:
+                logger.error('Exception returned in minimizing structure %d: %s', i, e)
+            logger.info('Saving partial results to %s.incomplete.pickle')
+            with open(prefix + '.incomplete.pickle', 'wb') as pf:
+                pickle.dump((completed, errors), pf, pickle.HIGHEST_PROTOCOL)
+            raise RuntimeError('Unable to complete bulk_minimize()')
+
+        # We finished lammps runs here
+        new_crd = np.array([x for i, (x, _, _) in completed])
+
+        if restart is not None:
+            os.remove(prefix + '.incomplete.pickle')
+
+        energies = np.array([info['final-energy'] for i, (_, info, _) in completed])
+        violated = [(i, info, violations) for i, (_, info, violations) in completed if len(violations)]
+        n_violated = len(violated)
+        logger.info('%d structures with violations over %d structures',
+                     n_violated,
+                     len(completed))
+        
+        write_hss(prefix + '.hss', new_crd, radii, chrom)
+        np.savetxt(prefix + '_energies.dat', energies)
+        return completed
     
-    lbv = parallel_client.load_balanced_view(engine_ids)
-
-    if restart is None:
-        to_minimize = list(range(n_struct))
-        completed = []
-    else:
-        with open(prefix + '.incomplete.pickle', 'rb') as pf:
-            completed, errors = pickle.load(pf)
-            to_minimize = [i for i, e in errors]
-
-    pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
-    f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations_=check_violations_, **kwargs)
-    
-    logging.info('bulk_minimize(): Starting bulk minimization of %d structures' % len(to_minimize))
-
-    ar = lbv.map_async(f, pargs)
-
-    monitor_progress('bulk_minimize() - %s' % prefix, ar)
-
-    logging.info('bulk_minimize(): Done')
-
-    results = list(ar.get())
-
-    errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
-    completed += [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
-    completed = list(sorted(completed))
-
-    if len(errors):
-        for i, e in errors:
-            logging.error('Exception returned in minimizing structure %d: %s', i, e)
-        logging.info('Saving partial results to %s.incomplete.pickle')
-        with open(prefix + '.incomplete.pickle', 'wb') as pf:
-            pickle.dump((completed, errors), pf, pickle.HIGHEST_PROTOCOL)
-        raise RuntimeError('Unable to complete bulk_minimize()')
-
-    # We finished lammps runs here
-    new_crd = np.array([x for i, (x, _, _) in completed])
-
-    if restart is not None:
-        os.remove(prefix + '.incomplete.pickle')
-
-    energies = np.array([info['final-energy'] for i, (_, info, _) in completed])
-    violated = [(i, info, violations) for i, (_, info, violations) in completed if len(violations)]
-    n_violated = len(violated)
-    logging.info('%d structures with violations over %d structures',
-                 n_violated,
-                 len(completed))
-    
-    write_hss(prefix + '.hss', new_crd, radii, chrom)
-    np.savetxt(prefix + '_energies.dat', energies)
-    return completed
-
+    except:
+        logger.error('bulk_minimization() failed', exc_info=True)
+        raise
 
     
 

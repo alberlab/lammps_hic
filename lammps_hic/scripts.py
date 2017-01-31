@@ -2,6 +2,7 @@ from ipyparallel import Client
 import logging
 import os
 import os.path
+import numpy as np
 
 from .actdist import get_actdists
 from .lammps import bulk_minimize
@@ -9,15 +10,19 @@ from .random import get_random_coordinates
 from .myio import write_hss, read_full_actdist
 
 
-
 def get_initial_coordinates(n_beads, radii, chrom, n_struct):
-    logging.info('Creating initial coordinates')
+
+
+    logger = logging.getLogger(__name__)
+
+
+    logger.info('Creating initial coordinates')
     crd = get_random_coordinates(n_beads, n_struct)
     write_hss('random.hss', crd, radii, chrom)
 
     rc = Client()
 
-    logging.info('Imposing chromosome territories')
+    logger.info('Imposing chromosome territories')
     bulk_minimize(rc, 
                   crd_fname='random.hss', 
                   prefix='chromosome_territory',
@@ -25,7 +30,7 @@ def get_initial_coordinates(n_beads, radii, chrom, n_struct):
                   territories=1,
                   mdsteps=30000)
 
-    logging.info('Relaxing conformations')
+    logger.info('Relaxing conformations')
     bulk_minimize(rc, 
                   crd_fname='chromosome_territory.hss', 
                   prefix='starting_configuration',
@@ -39,7 +44,10 @@ def run_modeling(client,
                  probability_matrix,
                  **kwargs):
 
-    rc = Client()
+    logger = logging.getLogger(__name__)
+
+    logger.info('run_modeling() called. STARTING RUN')
+
     last_ad = []
     last_hss = initial_coordinates_hss
 
@@ -50,6 +58,8 @@ def run_modeling(client,
         for sub_iter in sub_iterations:
 
             new_prefix = 'p%.3f_%s' % (theta, sub_iter)
+
+            logger.info('Starting iteration %.3f_%s', theta, sub_iter)
 
             ad_fname = 'Actdist/' + new_prefix + '.ActDist'
             if not os.path.isfile(ad_fname):
@@ -62,13 +72,20 @@ def run_modeling(client,
             else:
                 new_ad = read_full_actdist(ad_fname)
 
+            #from numpy.testing import assert_array_almost_equal
+            #assert_array_almost_equal(new_ad[:].actdist, read_full_actdist(ad_fname)[:].actdist, decimal=2)
+            client.purge_everything()
+
+
             if not os.path.isfile(new_prefix + '.hss'):
-                bulk_minimize(rc,
+                bulk_minimize(client,
                               last_hss,
                               prefix=new_prefix,
                               evfactor=0.1,
                               actdist=new_ad,
                               **kwargs)
+
+            client.purge_everything()
 
             last_hss = new_prefix + '.hss'
             last_ad = new_ad
