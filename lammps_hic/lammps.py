@@ -599,6 +599,9 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
 
     if args['write'] is None:
         args['write'] = args['mdsteps']  # write only final step
+    else:
+        # this is only because it may be passed as string
+        args['write'] = int(args['write'])
 
     chromid = _chromosome_string_to_numeric_id(chrom)
 
@@ -1200,13 +1203,17 @@ def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_vio
     return inner
 
 
+
+
+
+
 def bulk_minimize(parallel_client,
                   crd_fname,
                   prefix='minimize',
                   tmp_files_dir='/dev/shm',
                   log_dir='.',
                   check_violations_=True,
-                  restart=None,
+                  ignore_restart=False,
                   **kwargs):
     
     try:
@@ -1223,13 +1230,19 @@ def bulk_minimize(parallel_client,
 
         lbv = parallel_client.load_balanced_view(engine_ids)
 
-        if restart is None:
+        if ignore_restart:
             to_minimize = list(range(n_struct))
             completed = []
         else:
-            with open(prefix + '.incomplete.pickle', 'rb') as pf:
-                completed, errors = pickle.load(pf)
-                to_minimize = [i for i, e in errors]
+            if os.path.isfile(prefix + '.incomplete.pickle'):
+                logger.info('bulk_minimize(): Found restart file.')
+                with open(prefix + '.incomplete.pickle', 'rb') as pf:
+                    completed, errors = pickle.load(pf)
+                    to_minimize = [i for i, e in errors]
+                logger.info('bulk_minimize(): %d structures yet to minimize', len(to_minimize))
+            else:
+                to_minimize = list(range(n_struct))
+                completed = []
 
         logger.debug('bulk_minimize(): preparing arguments and function')
         pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
@@ -1247,6 +1260,8 @@ def bulk_minimize(parallel_client,
 
         results = list(ar.get())
 
+        ar = None
+
         errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
         completed += [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
         completed = list(sorted(completed))
@@ -1262,7 +1277,7 @@ def bulk_minimize(parallel_client,
         # We finished lammps runs here
         new_crd = np.array([x for i, (x, _, _) in completed])
 
-        if restart is not None:
+        if os.path.isfile(prefix + '.incomplete.pickle'):
             os.remove(prefix + '.incomplete.pickle')
 
         energies = np.array([info['final-energy'] for i, (_, info, _) in completed])

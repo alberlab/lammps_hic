@@ -1,4 +1,3 @@
-import h5py
 import logging
 import numpy as np
 
@@ -6,16 +5,9 @@ from .myio import read_hss
 from .util import monitor_progress
 
 
-def _compute_actdist(nstruct, nbead):
-    '''Calculate actdist closure. Returns a function,
-    taking as arguments i, j, pwish, plast.
-    Using a closure makes sure that even using
-    a load balanced view in ipyparallel every
-    engine has his own coordinates and radiuses
-    dictionaries. Hopefully this minimizes unneeded
-    communication. However, a direct view is probably
-    better here.'''
-    
+def _compute_actdist(data):
+    local_i, local_j, radii, to_process, nstruct = data
+
     def existingPortion(v, rsum):
         return sum(v<=rsum)*1.0/len(v)
 
@@ -26,64 +18,60 @@ def _compute_actdist(nstruct, nbead):
             pclean = pij
         return max(0, pclean)
         
-    def inner(data):
-        '''The function to be returned'''
-        import numpy as np
-        results = []
-        local_i, local_j, radii, to_process = data
-        
-        for i, j, pwish, plast in to_process:
-            
-            x1 = local_i['x1'][i-local_i['offset1']] 
-            x2 = local_i['x2'][i-local_i['offset2']]
-            y1 = local_j['x1'][j-local_j['offset1']] 
-            y2 = local_j['x2'][j-local_j['offset2']]
-            
-            
-            ri, rj = radii[i], radii[j]
 
-            d_sq = np.empty( (4, nstruct) )
-            d_sq[0] = np.sum(np.square(x1 - y1), axis=1)
-            d_sq[1] = np.sum(np.square(x2 - y2), axis=1)
-            d_sq[2] = np.sum(np.square(x1 - y2), axis=1)
-            d_sq[3] = np.sum(np.square(x2 - y1), axis=1)
-
-            sel_dist = np.empty(nstruct*2)
-            pnow = 0
-            rcutsq = np.square( 2*(ri+rj) )
-
-            for n in range(nstruct):
-                z = d_sq[:, n]
-
-                # assume the closest pair as the first (eventual) contact  
-                # and keep the distance of the only other pair which is compatible with it.
-                m = np.argsort(z)[0]
-                if m == 0 or m == 1:
-                    sel_dist[2*n:2*n+2] = z[0:2]
-                    pnow += np.sum( z[0:2] <= rcutsq )    
-                else:                   
-                    sel_dist[2*n:2*n+2] = z[2:4]
-                    pnow += np.sum( z[2:4] <= rcutsq )    
-
-            pnow = float(pnow) / (2.0 * nstruct)
-            sortdist_sq = np.sort(sel_dist)
-
-            t = cleanProbability(pnow, plast)
-            p = cleanProbability(pwish,t)
-
-            res = None
-            if p>0:
-                o = min(2 * nstruct - 1, int(round(2 * p * nstruct)))
-                activation_distance = np.sqrt(sortdist_sq[o]) - (ri + rj)
-                res = (i, j, pwish, activation_distance, p, pnow)
-                results.append(res)
-        return results
+    '''The function to be returned'''
+    import numpy as np
+    results = []
     
-    return inner
+    for i, j, pwish, plast in to_process:
+        
+        x1 = local_i['x1'][i-local_i['offset1']] 
+        x2 = local_i['x2'][i-local_i['offset2']]
+        y1 = local_j['x1'][j-local_j['offset1']] 
+        y2 = local_j['x2'][j-local_j['offset2']]
+        
+        
+        ri, rj = radii[i], radii[j]
+
+        d_sq = np.empty( (4, nstruct) )
+        d_sq[0] = np.sum(np.square(x1 - y1), axis=1)
+        d_sq[1] = np.sum(np.square(x2 - y2), axis=1)
+        d_sq[2] = np.sum(np.square(x1 - y2), axis=1)
+        d_sq[3] = np.sum(np.square(x2 - y1), axis=1)
+
+        sel_dist = np.empty(nstruct * 2)
+        pnow = 0
+        rcutsq = np.square(2 * (ri + rj))
+
+        for n in range(nstruct):
+            z = d_sq[:, n]
+
+            # assume the closest pair as the first (eventual) contact  
+            # and keep the distance of the only other pair which is compatible with it.
+            m = np.argsort(z)[0]
+            if m == 0 or m == 1:
+                sel_dist[2*n:2*n+2] = z[0:2]
+                pnow += np.sum( z[0:2] <= rcutsq )    
+            else:                   
+                sel_dist[2*n:2*n+2] = z[2:4]
+                pnow += np.sum( z[2:4] <= rcutsq )    
+
+        pnow = float(pnow) / (2.0 * nstruct)
+        sortdist_sq = np.sort(sel_dist)
+
+        t = cleanProbability(pnow, plast)
+        p = cleanProbability(pwish,t)
+
+        res = None
+        if p>0:
+            o = min(2 * nstruct - 1, int(round(2 * p * nstruct)))
+            activation_distance = np.sqrt(sortdist_sq[o]) - (ri + rj)
+            res = (i, j, pwish, activation_distance, p, pnow)
+            results.append(res)
+    return results
 
 
-
-def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None):
+def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None, scatter=3):
 
     logger = logging.getLogger(__name__)
     
@@ -103,7 +91,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     # matrix, such that the blocks are ~10 times the number of 
     # workers. This allows for some balancing but not resulting
     # in eccessive communication.
-    blocks_per_line = 3 * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
+    blocks_per_line = scatter * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
     if blocks_per_line > n_loci:
         blocks_per_line = n_loci
     block_size = (n_loci // blocks_per_line) + 1
@@ -112,10 +100,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     for i in range(n_loci):
         for j in range(i + 2, n_loci): # skips consecutive beads
             if probability_matrix[i, j] >= theta:
-                try:
-                    lp = last_prob[(i, j)]
-                except KeyError:
-                    lp = 0    
+                lp = last_prob.get((i, j), 0)
                 blocks[(i // block_size, j // block_size)].append((i, j, probability_matrix[i, j], lp))
         
     local_data = []
@@ -130,10 +115,14 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     for bi in range(blocks_per_line):
         for bj in range(bi, blocks_per_line):
             if len(blocks[(bi, bj)]) > 0:
-                args.append((local_data[bi], local_data[bj], radii, blocks[(bi, bj)]))
+                args.append([local_data[bi], local_data[bj], radii, blocks[(bi, bj)], n_struct])
     
-    lbview = parallel_client.load_balanced_view()
-    async_results = lbview.map_async(_compute_actdist(n_struct, n_loci), args)  # using the closure
+    engine_ids = list(parallel_client.ids)
+    dview = parallel_client[:]
+    dview.use_cloudpickle()
+    lbview = parallel_client.load_balanced_view(engine_ids)
+
+    async_results = lbview.map_async(_compute_actdist, args)
     
     monitor_progress('get_actdists()', async_results)
         

@@ -19,3 +19,10 @@ def monitor_progress(routine, async_results, timeout=async_check_timeout):
                     len(async_results),
                     pretty_tdelta(async_results.elapsed))
         async_results.wait(timeout)
+
+
+def set_remote_vals(direct_view, **kwargs):
+    logger = logging.getLogger(__name__)
+    for k, v in kwargs.items():
+        logger.debug('setting remote vals for %s:%s on %s', k, str(v), str(direct_view.targets))
+        direct_view[k] = v 
