@@ -13,11 +13,19 @@ def monitor_progress(routine, async_results, timeout=async_check_timeout):
     logger = logging.getLogger(__name__)
     logger.debug('monitor_progress(): checking %s every %d seconds.', routine, timeout)
     while not async_results.ready():
-        logger.info('%s: completed %d of %d tasks. Time elapsed: %s', 
+        n_tasks = len(async_results)
+        if async_results.progress > 0:
+            time_per_task = float(async_results.elapsed) / async_results.progress
+            eta = (n_tasks - async_results.progress)*time_per_task
+            etastr = pretty_tdelta(eta)
+        else:
+            etastr = 'N/A'
+        logger.info('%s: completed %d of %d tasks. Time elapsed: %s  Remaining: %s', 
                     routine,
                     async_results.progress,
-                    len(async_results),
-                    pretty_tdelta(async_results.elapsed))
+                    n_tasks,
+                    pretty_tdelta(async_results.elapsed),
+                    etastr)
         async_results.wait(timeout)
 
 
@@ -26,3 +34,4 @@ def set_remote_vals(direct_view, **kwargs):
     for k, v in kwargs.items():
         logger.debug('setting remote vals for %s:%s on %s', k, str(v), str(direct_view.targets))
         direct_view[k] = v 
+

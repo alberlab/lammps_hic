@@ -5,6 +5,7 @@ import h5py
 import math
 import logging
 import numpy as np
+import concurrent.futures
 from numpy.linalg import norm
 from io import StringIO
 from subprocess import Popen, PIPE
@@ -51,7 +52,7 @@ ARG_DEFAULT = {
     'max_cg_eval': 500,
     'etol': 1e-4,
     'ftol': 1e-6,
-    'territories': False,
+    'territories': 0,
     'soft_min': 0
 }
 
@@ -657,6 +658,7 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
                 chrom_start.append(i)
         chrom_start.append(n_atoms)
         for k in range(len(chrom_start) - 1):
+            nnbnds = 0
             chrom_len = chrom_start[k + 1] - chrom_start[k]
             chr_radii = bead_radii[chrom_start[k]:chrom_start[k + 1]]
             d = 4.0 * sum(chr_radii) / chrom_len  # 4 times the average radius
@@ -664,9 +666,10 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
             bt = bond_list.add_type('harmonic_upper_bound',
                                     kspring=1.0,
                                     r0=d)
-            for i in range(chrom_start[k], chrom_start[k + 1]):
-                for j in range(i + 1, chrom_start[k + 1]):
+            for i in range(chrom_start[k], chrom_start[k + 1], args['territories']):
+                for j in range(i + args['territories'], chrom_start[k + 1], args['territories']):
                     bond_list.add_bond(bt, i, j)
+                    nnbnds += 1
 
     ##############################################
     # Activation distance for contact restraints #
@@ -1025,12 +1028,12 @@ def check_violations(bond_list, crd):
             if d > bt.r0:
                 absv = d - bt.r0
                 relv = (d - bt.r0) / bt.r0
-                violations.append((absv, relv, bt))
+                violations.append((bond.i, bond.j, absv, relv, str(bt)))
         if bt.type_str == 'harmonic_lower_bound':
             if d < bt.r0:
                 absv = bt.r0 - d
                 relv = (bt.r0 - d) / bt.r0
-                violations.append((absv, relv, bt))
+                violations.append((bond.i, bond.j, absv, relv, str(bt)))
     return violations
 
 
@@ -1203,10 +1206,6 @@ def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_vio
     return inner
 
 
-
-
-
-
 def bulk_minimize(parallel_client,
                   crd_fname,
                   prefix='minimize',
@@ -1296,5 +1295,136 @@ def bulk_minimize(parallel_client,
         raise
 
     
+def serial_lammps_call(largs):
+    '''
+    Serial function to be mapped in parallel. 
+    largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) 
+    Reads parameters and coordinates from disk, perform minimization,
+    and return run information in a dictionary (see get_info_from_log).
+    In case of failure, gracefully returns None and the traceback.
+    '''
+    try:
+        # importing here so it will be called on the parallel workers
+        import json
+        import traceback
+        import os.path
+        from .myio import read_hms, write_hms
+        
+        # unpack arguments
+        fname, param_fname, new_fname = largs
+        run_name = os.path.splitext(os.path.basename(new_fname))[0]
+
+        # read parameters from disk
+        with open(param_fname) as f:
+            kwargs = json.load(f)
 
 
+        # read coordinates from disk
+        crd, radii, chrom, n_bead, violations, info = read_hms(fname)
+    
+        # perform minimization
+        new_crd, info, violations = lammps_minimize(crd, radii, chrom, run_name, **kwargs)
+        
+        # write coordinates to disk asyncronously and return run info
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        ex.submit(write_hms, new_fname, new_crd, radii, chrom, violations, info)
+        return (0, info, len(violations))
+
+    except:
+        import sys
+        etype, value, tb = sys.exc_info()
+        infostr = ''.join(traceback.format_exception(etype, value, tb))
+        return (None, infostr, 0)
+
+    
+
+def bulk_minimize_single_file(parallel_client,
+                              old_prefix,
+                              new_prefix,
+                              n_struct,
+                              workdir='.',
+                              tmp_files_dir='/dev/shm',
+                              log_dir='.',
+                              check_violations_=True,
+                              ignore_restart=False,
+                              **kwargs):
+    '''
+    Uses ipyparallel to minimize n_struct structures.
+    parallel_client is an instance of ipyparallel.Client
+    The filenames are expected to be in the form
+    prefix_<structure id>.hms 
+    Maps the minimization to the workers and return statistics
+    for the whole run. If one or more of the minimizations
+    fails, it will raise a RuntimeError.
+    '''
+    # get the logger
+    logger = logging.getLogger(__name__)
+
+    try:
+        import json
+
+        # write all parameters to a file on filesystem
+        kwargs['check_violations_'] = check_violations_
+        kwargs['ignore_restart'] = ignore_restart
+        kwargs['tmp_files_dir'] = tmp_files_dir
+        kwargs['log_dir'] = log_dir
+        parameter_fname = os.path.join(workdir, new_prefix + '.parms.json')
+        with open(parameter_fname, 'w') as fp:
+            json.dump(kwargs, fp)
+    
+        # check if we already have some output files written.
+        completed = []
+        to_minimize = []
+        if ignore_restart:
+            to_minimize = list(range(n_struct))
+            logger.info('bulk_minimize(): ignoring completed runs.')
+        else:
+            for i in range(n_struct):
+                fname = '{}_{}.hms'.format(new_prefix, i)
+                fpath = os.path.join(workdir, fname)
+                if os.path.isfile(fpath):
+                    completed.append(i)
+                else:
+                    to_minimize.append(i)
+            logger.info('bulk_minimize(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
+
+        # prepare arguments as a list of tuples (map wants a single argument for each call)
+        pargs = [(os.path.join(workdir, '{}_{}.hms'.format(old_prefix, i)),
+                  parameter_fname,
+                  os.path.join(workdir, '{}_{}.hms'.format(new_prefix, i))) for i in to_minimize] 
+
+        # using ipyparallel to map functions to workers
+        engine_ids = list(parallel_client.ids)
+        lbv = parallel_client.load_balanced_view()
+
+        logger.info('bulk_minimize(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
+        ar = lbv.map_async(serial_lammps_call, pargs)
+        logger.debug('bulk_minimize(): map_async sent.')
+
+        # monitor progress
+        monitor_progress('bulk_minimize() - %s' % new_prefix, ar)
+
+        # post-analysis
+        logger.info('bulk_minimize(): Done')
+        results = list(ar.get())  # returncode, info, n_violations  
+
+        # check for errors
+        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
+        now_completed = [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
+        if len(errors):
+            for i, e in errors:
+                logger.error('Exception returned in minimizing structure %d: %s', i, e)
+                print()
+            raise RuntimeError('Unable to complete bulk_minimize()')
+        
+        # print a summary
+        n_violated = sum([1 for i, r in now_completed if r[2] > 0 ])
+        logger.info('%d structures with violations over %d structures',
+                     n_violated,
+                     len(now_completed))
+
+        return now_completed
+    
+    except:
+        logger.error('bulk_minimization() failed', exc_info=True)
+        raise
