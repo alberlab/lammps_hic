@@ -66,18 +66,18 @@ def read_hss(fname, i=None):
 
 
 def write_hss(fname, crd, radii, chrom):
-    if len(radii) != crd.shape[1]:
+    if len(radii) != len(crd[0]):
         logging.warning('write_hss(): len(radii) != crd.shape[1]')
 
-    if len(chrom) != crd.shape[1]:
-        logging.warning('write_hss(): len(chrom) != crd.shape[1]')
+    if len(chrom) != len(radii):
+        logging.warning('write_hss(): len(chrom) != len(radii)')
     
     with h5py.File(fname, 'w') as f: 
         f.create_dataset('coordinates', data=crd, dtype='f4')
         f.create_dataset('radius', data=radii, dtype='f4')
         f.create_dataset('idx', data=chrom)
-        f.create_dataset('nstruct', data=crd.shape[0], dtype='i4')
-        f.create_dataset('nbead', data=crd.shape[1], dtype='i4')
+        f.create_dataset('nstruct', data=len(crd), dtype='i4')
+        f.create_dataset('nbead', data=len(crd[0]), dtype='i4')
 
 
 def read_hms(fname):
@@ -94,10 +94,10 @@ def read_hms(fname):
 
 def write_hms(fname, crd, radii, chrom, violations=[], info={}):
     
-    if len(radii) != crd.shape[0]:
+    if len(radii) != len(crd):
         logging.warning('write_hms(): len(radii) != crd.shape[0]')
 
-    if len(chrom) != crd.shape[0]:
+    if len(chrom) != len(crd):
         logging.warning('write_hms(): len(chrom) != crd.shape[0]')
     
     with h5py.File(fname, 'w') as f: 
@@ -109,68 +109,87 @@ def write_hms(fname, crd, radii, chrom, violations=[], info={}):
         f.create_dataset('info', data=json.dumps(info))
 
 
-def pack_hss(prefix, n_struct, out_fname):
-    '''
-    Create an hss file from multiple hms files
-    '''
-    crd, radii, chrom, _, _, _ = read_hms('{}_{}.hms'.format(prefix, 0))
-    crds = [crd]
-    for i in range(n_struct):
-        fname = '{}_{}.hms'.format(prefix, i)
-        with h5py.File(fname, 'r') as f:
-            crds.append(f['coordinates'][()])
-    write_hss(out_fname, crds, radii, chrom)
-
-
-def write_info_file(fname, infos):
-    if len(infos) == 0:
-        open(fname, 'w')  # writes an empty file and returns
-        return
-    keys = infos[0].keys()
-    with open(fname, 'w') as f:
-        print('# structure', file=f, end='  ')
-        for k in keys:
-            print(str(k), file=f, end='  ')
-        for i, info in enumerate(infos):
-            for k in keys:
-                print(str(info[k]), file=f, end='  ')
-
-
-def write_violations_file(fname, violations_list):
-    with open(fname, 'w') as f: 
-        for i, violations in enumerate(violations_list):
-            if len(violations) > 0:
-                print('STRUCTURE: {}'.format(i), file=f)
-                for v in violations:
-                    print(v['bt'], ':', v['i'], v['j'], v['absv'], v['relv'])
-
-    
-
-def clear_hms(prefix, n_struct, violations_file=None, info_file=None):
+def remove_hms(prefix, n_struct):
     '''
     Removes hms files.
-    If violation_file and/or info_file are specified,
-    will save the relative information instead of discarding it.
-    On several iterations, the number of hms files becomes very large. 
-    Once packed in a hss, it is reasonable to remove them and eventually pack
-    the rest of the information on a single file.
     '''
-    violations = []
-    infos = []
-    if violations_file is not None:
-        for i in range(n_struct):
-            fname = '{}_{}.hms'.format(prefix, i)
-            with h5py.File(fname, 'r') as f:
-                violations.append(f['violations'][()])
-        write_violations_file(violations_file)
-
-    if info_file is not None:    
-        for i in range(n_struct):
-            with h5py.File(fname, 'r') as f:
-                infos.append(json.loads(f['info'][()]))
-
     for i in range(n_struct):
-        os.remove(fname)
+        fname = '{}_{}.hms'.format(prefix, i)
+        if os.path.isfile(fname):
+            os.remove(fname)
+
+
+def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_after=False):
+    try:
+        crd, radii, chrom, n_beads, cviol, cinfo = read_hms('{}_{}.hms'.format(prefix, 0))
+        
+        def _vprint(file, violations, structure_index):
+            if len(violations) > 0:
+                print('STRUCTURE:', structure_index, file=file)
+                for v in violations:
+                    print(v['bt'], ':', v['i'], v['j'], v['absv'], v['relv'], file=file)
+
+        def _iprint(file, info, structure_index):
+            print(structure_index, file=file, end='  ')
+            for k, v in info.items():
+                print(v, file=file, end='  ')
+            print('', file=file)
+
+        # opens files
+        if hss is not None:
+            hss_file = h5py.File(hss, 'w')
+            hss_file.create_dataset('coordinates', shape=(n_struct, n_beads, 3), dtype='f4')
+            hss_file.create_dataset('radius', data=radii, dtype='f4')
+            hss_file.create_dataset('idx', data=chrom)
+            hss_file.create_dataset('nstruct', data=n_struct, dtype='i4')
+            hss_file.create_dataset('nbead', data=n_beads, dtype='i4')
+            hss_file['coordinates'][0] = crd
+
+        if violations is not None:
+            violations_file = open(violations, 'w')
+            _vprint(violations_file, cviol, 0)
+
+        if info is not None:
+            info_file = open(info, 'w')
+
+            # print headers
+            print('# structure', file=info_file, end='  ')
+            for k in cinfo.keys():
+                print(str(k), file=info_file, end='  ')
+            print('', file=info_file)
+
+            # print first record
+            _iprint(info_file, cinfo, 0)
+
+        for i in range(1, n_struct):
+            fname = '{}_{}.hms'.format(prefix, i)
+        
+            with h5py.File(fname, 'r') as f:
+                if hss:
+                    hss_file['coordinates'][i] = f['coordinates'][()]
+
+                if violations:
+                    _vprint(violations_file, f['violations'][()], i)
+
+                if info:
+                    _iprint(info_file, json.loads(f['info'][()]), i)
+
+        if hss:
+            hss_file.close()
+        if violations:
+            violations_file.close()
+        if info:
+            info_file.close()
+
+        if remove_after:
+            remove_hms(prefix, n_struct)
+
+    except: # let's make sure the hdf5 file is removed, else weird stuff happens
+        if os.path.isfile(hss):
+            os.remove(hss)
+        raise
+    
+
 
 
 

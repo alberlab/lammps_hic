@@ -3,6 +3,9 @@ from .globals import async_check_timeout
 
 
 def pretty_tdelta(seconds):
+    '''
+    Prints the *seconds* in the format h mm ss
+    '''
     seconds = int(seconds)
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
@@ -10,7 +13,7 @@ def pretty_tdelta(seconds):
         
 
 def monitor_progress(routine, async_results, timeout=async_check_timeout):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger()
     logger.debug('monitor_progress(): checking %s every %d seconds.', routine, timeout)
     while not async_results.ready():
         n_tasks = len(async_results)
@@ -30,7 +33,7 @@ def monitor_progress(routine, async_results, timeout=async_check_timeout):
 
 
 def set_remote_vals(direct_view, **kwargs):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger()
     for k, v in kwargs.items():
         logger.debug('setting remote vals for %s:%s on %s', k, str(v), str(direct_view.targets))
         direct_view[k] = v 

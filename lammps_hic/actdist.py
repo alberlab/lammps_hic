@@ -1,7 +1,33 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2015 University of Southern California and
+#                        Guido Polles
+# 
+# Authors: Guido Polles, Nan Hua
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+__author__  = "Guido Polles"
+
+__license__ = "GPL"
+__version__ = "0.0.1"
+__email__   = "polles@usc.edu"
+
 import logging
 import numpy as np
 
-from .myio import read_hss
+from .myio import read_hss, read_full_actdist
 from .util import monitor_progress
 
 
@@ -72,10 +98,51 @@ def _compute_actdist(data):
 
 
 def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None, scatter=3):
+    '''
+    Compute activation distances using ipyparallel. 
+    Input parameters:
+    * parallel_client: an ipyparallel Client istance to send jobs
+    * crd_fname: an hss filename of the coordinates
+    * probability_matrix: the contact probability matrix
+    * theta: work only on contacts with probability greater or equal to theta
+    * last_ad: the last activation distances. Either the filename or an iterable
+      with the activation distances of the last step, or None.
+    * save_to: file where to save the newly computed activation distances
+    * scatter: level of block subdivisions of the matrix. This function
+      divide the needed computations into blocks before sending the request
+      to parallel workers. It is a compromise between (i) sending coordinates for
+      every i, j pair computation and (ii) sending all the coordinates to the workers. 
+      Option (i) would require a lot of communication, while option
+      (ii) would require a lot of memory on workers.
+      Hence, i's and j's are subdivided into blocks and sent to the workers, toghether
+      with the needed coordinates. Note that usually blocks on the diagonal 
+      have a ton more contacts, hence for load balancing purposes the total number of blocks
+      should be larger than the number of workers. scatter=1 means that the 
+      number of blocks is just big enough to have all workers receiving at
+      least 1 job. Hence, blocks are big and the load is not really balanced.
+      Higher values of scatter correspond to smaller blocks and better balancing
+      at the cost of increased communication. Note that scatter increase
+      the *linear* number of blocks, so scatter=10 means that the total
+      number of blocks is ~100 times the number of workers.
+    
+    Returns:
+    * a numpy recarray with the newly computed activation distances
 
-    logger = logging.getLogger(__name__)
+    Exceptions:
+    * If the parallel client has no registered workers, it raises 
+      a RuntimeError.
+    * Does not catch any error coming from wrong parameters or 
+      input
+    '''
+
+    logger = logging.getLogger()
     
     logger.info('Starting contact activation distance job on %s, p = %.3f', crd_fname, theta)
+
+    if last_ad is None:
+        last_ad = []
+    elif isinstance(last_ad, str) or isinstance(last_ad, unicode):
+        last_ad = read_full_actdist(last_ad)   
 
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
     n_loci = len(probability_matrix)

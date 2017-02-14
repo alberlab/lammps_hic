@@ -15,8 +15,8 @@ except ImportError:
     import pickle
 
 
-from .myio import read_hss, write_hss
-from .util import monitor_progress
+from .myio import read_hss, write_hss, read_full_actdist
+from .util import monitor_progress, pretty_tdelta
 from .globals import lammps_executable, float_epsilon
 
 
@@ -178,414 +178,7 @@ def _chromosome_string_to_numeric_id(chrom):
     return chrom_id
 
 
-def generate_input_single_radius(crd, bead_radius, chrom, **kwargs):
-    ''' from coordinates of the beads, a single bead radius
-    and the list of relative chrmosomes, it constructs the
-    input files for running a minimization. Has various arguments,
-    the ones in the ARG_DEFAULT dictionary. This is a quite long
-    function, performing the parsing and the output. '''
-
-    args = {k: v for k, v in ARG_DEFAULT.items()}
-    for k, v in kwargs.items():
-        if v is not None:
-            args[k] = v
-
-    if args['write'] is None:
-        args['write'] = args['mdsteps']  # write only final step
-
-    chromid = _chromosome_string_to_numeric_id(chrom)
-
-    n_hapl = len(crd) // 2
-    n_atoms = len(crd)
-    x1 = crd[:n_hapl]
-    x2 = crd[n_hapl:]
-    assert (len(x1) == len(x2))
-
-    # Harmonic Upper Bond Coefficients are one for each bond type
-    # and coded as:
-    #   Bond_type_id kspring activation_distance
-    # Each bond is coded as:
-    #   Bond_id Bond_type_id ibead jbead
-
-    bond_list = BondContainer()
-    dummies = DummyAtoms(n_atoms)
-
-    ###############################
-    # Add consecutive beads bonds #
-    ###############################
-
-    bt = bond_list.add_type('harmonic_upper_bound',
-                            kspring=1.0,
-                            r0=4 * bead_radius)
-
-    for i in range(n_atoms - 1):
-        if chrom[i] == chrom[i + 1]:
-            bond_list.add_bond(bt, i, i + 1)
-
-    ##############################
-    # Add chromosome territories #
-    ##############################
-
-    if args['territories']:
-        # for the territories step we want to make chromosomes very dense (3x?)
-        terr_occupancy = args['occupancy'] * 3
-        chrom_start = [0]
-        for i in range(1, n_atoms):
-            if chrom[i] != chrom[i - 1]:
-                chrom_start.append(i)
-        chrom_start.append(n_atoms)
-        for k in range(len(chrom_start) - 1):
-            chrom_len = chrom_start[k + 1] - chrom_start[k]
-            d = 4.0 * bead_radius
-            d *= (float(chrom_len) / terr_occupancy)**(1. / 3)
-            bt = bond_list.add_type('harmonic_upper_bound',
-                                    kspring=1.0,
-                                    r0=d)
-            for i in range(chrom_start[k], chrom_start[k + 1]):
-                for j in range(i + 1, chrom_start[k + 1]):
-                    bond_list.add_bond(bt, i, j)
-
-    ##############################################
-    # Activation distance for contact restraints #
-    ##############################################
-    # NOTE: activation distances are surface to surface, not center to center
-    # The old method was using minimum pairs
-    # Here we enforce a single pair.
-    if args['actdist'] is not None:
-        if isinstance(args['actdist'], str):
-            if os.path.getsize(args['actdist']) > 0:
-                actdists = np.genfromtxt(args['actdist'],
-                                         usecols=(0, 1, 2, 3, 4, 5),
-                                         dtype=(int, int, float, float, float, float))
-            else:
-                actdists = []
-        else:
-            actdists = args['actdist']
-
-        for (i, j, pwish, d, p, pnow) in actdists:
-            cd = np.zeros(4)
-            rsph = bead_radius + bead_radius
-            dcc = d + rsph  # center to center distance
-
-            cd[0] = norm(x1[i] - x1[j])
-            cd[1] = norm(x2[i] - x2[j])
-            cd[2] = norm(x1[i] - x2[j])
-            cd[3] = norm(x2[i] - x1[j])
-
-            # find closest distance and remove incompatible contacts
-            idx = np.argsort(cd)
-
-            if cd[idx[0]] > dcc:
-                continue
-
-            # we have at least one bond to enforce
-            bt = bond_list.add_type('harmonic_upper_bound',
-                                    kspring=args['contact_kspring'],
-                                    r0=args['contact_range'] * rsph)
-
-            if idx[0] == 0 or idx[0] == 1:
-                cd[2] = np.inf
-                cd[3] = np.inf
-            else:
-                cd[0] = np.inf
-                cd[1] = np.inf
-
-            # add bonds
-            if cd[0] < dcc:
-                bond_list.add_bond(bt, i, j)
-            if cd[1] < dcc:
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
-            if cd[2] < dcc:
-                bond_list.add_bond(bt, i, j + n_hapl)
-            if cd[3] < dcc:
-                bond_list.add_bond(bt, i + n_hapl, j)
-
-    #############################################
-    # Activation distances for damid restraints #
-    #############################################
-
-    if args['damid'] is not None:
-        if isinstance(args['damid'], str):
-            if os.path.getsize(args['damid']) > 0:
-                damid_actdists = np.genfromtxt(args['damid'],
-                                               usecols=(0, 1, 2),
-                                               dtype=(int, float, float))
-                if damid_actdists.shape == ():
-                    damid_actdists = [damid_actdists]
-            else:
-                damid_actdists = []
-
-        for item in damid_actdists:
-            i = item[0]
-            d = item[2]
-            # target minimum distance
-            td = args['nucleus_radius'] - (2 * bead_radius)
-
-            # current distances
-            cd = np.zeros(2)
-            cd[0] = args['nucleus_radius'] - norm(x1[i])
-            cd[1] = args['nucleus_radius'] - norm(x2[i])
-
-            idx = np.argsort(cd)
-
-            if cd[idx[0]] > d:
-                continue
-
-            # we have at least one bond to enforce
-            bt = bond_list.add_type('harmonic_lower_bound',
-                                    kspring=args['damid_kspring'],
-                                    r0=td)
-
-            # add bonds
-            if cd[0] < d:
-                bond_list.add_bond(bt, i, dummies.next())
-            if cd[1] < d:
-                bond_list.add_bond(bt, i + n_hapl, dummies.next())
-
-    ###############################################
-    # Add bonds for fish restraints, if specified #
-    ###############################################
-
-    if args['fish'] is not None:
-        hff = h5py.File(args['fish'], 'r')
-        minradial = 'r' in args['fish_type']
-        maxradial = 'R' in args['fish_type']
-        minpair = 'p' in args['fish_type']
-        maxpair = 'P' in args['fish_type']
-
-        if minradial:
-            cd = np.zeros(2)
-            probes = hff['probes']
-            minradial_dist = hff['radial_min'][:, args['i']]
-            for k, i in enumerate(probes):
-                td = minradial_dist[k]
-                cd[0] = norm(x1[i])
-                cd[1] = norm(x2[i])
-                if cd[0] < cd[1]:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, td - args['fish_tol']))
-                bond_list.add_bond(bt, ii, dummies.next())
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=td + args['fish_tol'])
-                bond_list.add_bond(bt, ii, dummies.next())
-
-        if maxradial:
-            cd = np.zeros(2)
-            probes = hff['probes']
-            maxradial_dist = hff['radial_max'][:, args['i']]
-            for k, i in enumerate(probes):
-                td = maxradial_dist[k]
-                cd[0] = norm(x1[i])
-                cd[1] = norm(x2[i])
-                if cd[0] > cd[1]:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=td + args['fish_tol'])
-                bond_list.add_bond(bt, ii, dummies.next())
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, td - args['fish_tol']))
-                bond_list.add_bond(bt, ii, dummies.next())
-
-        if minpair:
-            pairs = hff['pairs']
-            minpair_dist = hff['pair_min'][:, args['i']]
-            for k, (i, j) in enumerate(pairs):
-                dmin = minpair_dist[k]
-
-                cd = np.zeros(4)
-                cd[0] = norm(x1[i] - x1[j])
-                cd[1] = norm(x2[i] - x2[j])
-                cd[2] = norm(x1[i] - x2[j])
-                cd[3] = norm(x2[i] - x1[j])
-
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, dmin - args['fish_tol']))
-                bond_list.add_bond(bt, i, j)
-                bond_list.add_bond(bt, i, j + n_hapl)
-                bond_list.add_bond(bt, i + n_hapl, j)
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
-
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=dmin + args['fish_tol'])
-                idx = np.argsort(cd)
-
-                if idx[0] == 0 or idx[0] == 2:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                if idx[0] == 0 or idx[0] == 3:
-                    jj = j
-                else:
-                    jj = j + n_hapl
-                bond_list.add_bond(bt, ii, jj)
-
-        if maxpair:
-            pairs = hff['pairs']
-            maxpair_dist = hff['pair_max'][:, args['i']]
-            for k, (i, j) in enumerate(pairs):
-                dmax = maxpair_dist[k]
-
-                cd = np.zeros(4)
-                cd[0] = norm(x1[i] - x1[j])
-                cd[1] = norm(x2[i] - x2[j])
-                cd[2] = norm(x1[i] - x2[j])
-                cd[3] = norm(x2[i] - x1[j])
-
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=dmax + args['fish_tol'])
-                bond_list.add_bond(bt, i, j)
-                bond_list.add_bond(bt, i, j + n_hapl)
-                bond_list.add_bond(bt, i + n_hapl, j)
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl)
-
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, dmax - args['fish_tol']))
-                idx = np.argsort(cd)
-                if idx[-1] == 0 or idx[-1] == 2:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                if idx[-1] == 0 or idx[-1] == 3:
-                    jj = j
-                else:
-                    jj = j + n_hapl
-                bond_list.add_bond(bt, ii, jj)
-        hff.close()
-
-    ############################
-    # Create LAMMPS input file #
-    ############################
-
-    n_bonds = len(bond_list.bonds)
-    n_bondtypes = len(bond_list.bond_types)
-    n_bead_types = 1
-    dummy_type = n_bead_types + 1
-
-    with open(args['data'], 'w') as f:
-
-        print('LAMMPS input\n', file=f)
-
-        print(n_atoms + dummies.n_dummy, 'atoms\n', file=f)
-        print(n_bead_types + 1, 'atom types\n', file=f)
-        print(n_bondtypes, 'bond types\n', file=f)
-        print(n_bonds, 'bonds\n', file=f)
-
-        # keeping some free space to be sure
-        print('-6000 6000 xlo xhi\n',
-              '-6000 6000 ylo yhi\n',
-              '-6000 6000 zlo zhi', file=f)
-
-        print('\nAtoms\n', file=f)
-        # index, molecule, atom type, x y z.
-        for i, x in enumerate(x1):
-            print(i + 1, chromid[i], 1, x[0], x[1], x[2], file=f)
-        for i, x in enumerate(x2):
-            print(i + 1 + n_hapl, chromid[i], 1, x[0], x[1], x[2], file=f)
-
-        # dummy atoms in the middle
-        dummy_mol = max(chromid) + 1
-        for i in range(dummies.n_dummy):
-            print(n_atoms + i + 1, dummy_mol, 2, 0, 0, 0, file=f)
-
-        print('\nBond Coeffs\n', file=f)
-        for bc in bond_list.bond_types:
-            print(bc, file=f)
-
-        print('\nBonds\n', file=f)
-        for b in bond_list.bonds:
-            print(b, file=f)
-
-    ##########################
-    # Create lmp script file #
-    ##########################
-
-    with open(args['lmp'], 'w') as f:
-        print('units                 lj', file=f)
-        print('atom_style            bond', file=f)
-        print('bond_style  hybrid',
-              'harmonic_upper_bound',
-              'harmonic_lower_bound', file=f)
-        print('boundary              f f f', file=f)
-
-        # Needed to avoid calculation of 3 neighs and 4 neighs
-        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
-
-        # excluded volume
-        print('pair_style lj/cut', 2 * bead_radius, file=f)  # global cutoff
-
-        print('read_data', args['data'], file=f)
-        print('mass * 1.0', file=f)
-
-        print('group beads type !=', dummy_type, file=f)
-        print('group dummy type', dummy_type, file=f)
-
-        print('neighbor', 2 * bead_radius, 'bin', file=f)  # skin size
-        print('neigh_modify every 10 check yes', file=f)
-        print('neigh_modify one', args['max_neigh'],
-              'page', 20 * args['max_neigh'], file=f)
-
-        # Freeze dummy atom
-        print('fix 1 dummy setforce 0.0 0.0 0.0', file=f)
-        print('neigh_modify exclude group dummy all check no', file=f)
-
-        # Integration
-        # select the integrator
-        print('fix 2 beads nve/limit', args['max_velocity'], file=f)
-        # Impose a thermostat - Tstart Tstop tau_decorr seed
-        print('fix 3 beads langevin', args['tstart'], args['tstop'],
-              args['damp'], args['seed'], file=f)
-        print('timestep', args['timestep'], file=f)
-
-        # Region
-        print('region mySphere sphere 0.0 0.0 0.0',
-              args['nucleus_radius'] + 2 * bead_radius, file=f)
-        print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
-              2 * bead_radius, file=f)
-
-        # Initial minimization
-        if args['soft_min'] != 0:
-            print('pair_style soft', 2 * bead_radius, file=f)  # global cutoff
-            print('pair_coeff 2 2 0.0', file=f)
-            print('pair_coeff 1 1', args['evfactor'], 2 * bead_radius, file=f)
-            print('run', args['soft_min'], file=f)
-            print('pair_style lj/cut', 2 * bead_radius, file=f)  # reset
-
-        # print('pair_coeff 2 2 0.0 1.0', file=f)
-        print('pair_coeff * *', args['evfactor'], 2 * bead_radius / 1.122,
-              file=f)
-
-        print('pair_modify shift yes', file=f)
-
-        # outputs:
-        print('dump   id beads custom',
-              args['write'],
-              args['out'],
-              'id type x y z fx fy fz', file=f)
-        print('thermo', args['thermo'], file=f)
-
-        # Run MD
-        print('run', args['mdsteps'], file=f)
-
-        # Run CG
-        print('min_style cg', file=f)
-        print('minimize', args['etol'], args['ftol'],
-              args['max_cg_iter'], args['max_cg_eval'], file=f)
-
-
-def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
+def generate_input(crd, bead_radii, chrom, **kwargs):
     '''From coordinates of the beads, their radii
     and the list of relative chrmosomes, it constructs the
     input files for running a minimization. Has various arguments,
@@ -678,11 +271,9 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
     # The old method was using minimum pairs
     # Here we enforce a single pair.
     if args['actdist'] is not None:
-        if isinstance(args['actdist'], str):
+        if isinstance(args['actdist'], str) or isinstance(args['actdist'], unicode):
             if os.path.getsize(args['actdist']) > 0:
-                actdists = np.genfromtxt(args['actdist'],
-                                         usecols=(0, 1, 2, 3, 4, 5),
-                                         dtype=(int, int, float, float, float, float))
+                actdists = read_full_actdist(args['actdist'])
             else:
                 actdists = []
         else:
@@ -731,7 +322,7 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
     #############################################
 
     if args['damid'] is not None:
-        if isinstance(args['damid'], str):
+        if isinstance(args['damid'], str) or isinstance(args['damid'], unicode):
             if os.path.getsize(args['damid']) > 0:
                 damid_actdists = np.genfromtxt(args['damid'],
                                                usecols=(0, 1, 2),
@@ -1019,7 +610,7 @@ def generate_input_multiple_radius(crd, bead_radii, chrom, **kwargs):
     return bond_list
 
 
-def check_violations(bond_list, crd):
+def _check_violations(bond_list, crd):
     violations = []
     for bond in bond_list.bonds:
         bt = bond_list.bond_types[bond.bond_type]
@@ -1120,7 +711,7 @@ def get_last_frame(fh):
     return crds
 
 
-def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations_=True, **kwargs):
+def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
     ''' lammps_minimize: calls lammps on files on
     /dev/shm for performance, and checks execution
     result and final energies '''
@@ -1134,7 +725,7 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
         # prepare input
         opts = {'out': traj_fname, 'data': data_fname, 'lmp': script_fname}
         kwargs.update(opts)
-        bond_list = generate_input_multiple_radius(crd, radii, chrom, **kwargs)
+        bond_list = generate_input(crd, radii, chrom, **kwargs)
 
         # run the lammps minimization
         with open(script_fname, 'r') as lamfile:
@@ -1177,9 +768,9 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
         raise
 
 
-    if check_violations_:
+    if check_violations:
         if info['bond-energy'] > float_epsilon:
-            violations = check_violations(bond_list, new_crd)
+            violations = _check_violations(bond_list, new_crd)
         else: 
             violations = []
         return new_crd, info, violations
@@ -1188,7 +779,7 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
 
 
 # closure for parallel mapping
-def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_violations_=True, **kwargs):
+def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
     def inner(pargs):
         try:
             crd, run_name = pargs
@@ -1198,7 +789,7 @@ def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_vio
                                    run_name,
                                    tmp_files_dir=tmp_files_dir,
                                    log_dir=log_dir,
-                                   check_violations_=check_violations_,
+                                   check_violations=check_violations,
                                    **kwargs)
         except:
             import sys
@@ -1211,12 +802,11 @@ def bulk_minimize(parallel_client,
                   prefix='minimize',
                   tmp_files_dir='/dev/shm',
                   log_dir='.',
-                  check_violations_=True,
+                  check_violations=True,
                   ignore_restart=False,
-                  **kwargs):
-    
+                  **kwargs):    
     try:
-        logger = logging.getLogger(__name__)
+        logger = logging.getLogger()
 
         logger.debug('bulk_minimize() entry')
 
@@ -1245,7 +835,7 @@ def bulk_minimize(parallel_client,
 
         logger.debug('bulk_minimize(): preparing arguments and function')
         pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
-        f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations_=check_violations_, **kwargs)
+        f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations=check_violations, **kwargs)
         
         logger.info('bulk_minimize(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
 
@@ -1345,7 +935,7 @@ def bulk_minimize_single_file(parallel_client,
                               workdir='.',
                               tmp_files_dir='/dev/shm',
                               log_dir='.',
-                              check_violations_=True,
+                              check_violations=True,
                               ignore_restart=False,
                               **kwargs):
     '''
@@ -1358,13 +948,13 @@ def bulk_minimize_single_file(parallel_client,
     fails, it will raise a RuntimeError.
     '''
     # get the logger
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger()
 
     try:
         import json
 
         # write all parameters to a file on filesystem
-        kwargs['check_violations_'] = check_violations_
+        kwargs['check_violations'] = check_violations
         kwargs['ignore_restart'] = ignore_restart
         kwargs['tmp_files_dir'] = tmp_files_dir
         kwargs['log_dir'] = log_dir
@@ -1386,6 +976,9 @@ def bulk_minimize_single_file(parallel_client,
                     completed.append(i)
                 else:
                     to_minimize.append(i)
+            if len(to_minimize) == 0:
+                logger.info('bulk_minimize(): minimization appears to be already finished.')
+                return []
             logger.info('bulk_minimize(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
 
         # prepare arguments as a list of tuples (map wants a single argument for each call)
@@ -1405,7 +998,7 @@ def bulk_minimize_single_file(parallel_client,
         monitor_progress('bulk_minimize() - %s' % new_prefix, ar)
 
         # post-analysis
-        logger.info('bulk_minimize(): Done')
+        logger.info('bulk_minimize(): Done (Total time: %s)' % pretty_tdelta(ar.wall_time))
         results = list(ar.get())  # returncode, info, n_violations  
 
         # check for errors
@@ -1423,7 +1016,7 @@ def bulk_minimize_single_file(parallel_client,
                      n_violated,
                      len(now_completed))
 
-        return now_completed
+        return len(now_completed), n_violated
     
     except:
         logger.error('bulk_minimization() failed', exc_info=True)
