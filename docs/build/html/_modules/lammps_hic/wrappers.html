@@ -1,0 +1,382 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>lammps_hic.wrappers &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for lammps_hic.wrappers</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">multiprocessing</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">pack_hms</span>
+
+<span class="k">class</span> <span class="nc">ModelingStepProcess</span><span class="p">(</span><span class="n">multiprocessing</span><span class="o">.</span><span class="n">Process</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">ModelingStepProcess</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">from_label</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;from_label&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;to_label&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_conf</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;n_conf&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">workdir</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;workdir&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span> <span class="o">=</span> <span class="n">kwargs</span>
+
+    <span class="k">def</span> <span class="nf">minimization_process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        set logger and client</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="kn">import</span> <span class="nn">zmq</span>
+        <span class="kn">import</span> <span class="nn">traceback</span>
+        <span class="kn">from</span> <span class="nn">ipyparallel</span> <span class="k">import</span> <span class="n">Client</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">rc</span> <span class="o">=</span> <span class="n">Client</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="n">zmq</span><span class="o">.</span><span class="n">Context</span><span class="p">())</span>  <span class="c1"># Using a fresh context!</span>
+            <span class="kn">from</span> <span class="nn">lammps_hic.lammps</span> <span class="k">import</span> <span class="n">bulk_minimize_single_file</span>
+            <span class="n">n_completed</span><span class="p">,</span> <span class="n">n_violated</span> <span class="o">=</span> <span class="n">bulk_minimize_single_file</span><span class="p">(</span><span class="n">rc</span><span class="p">,</span> 
+                                                                <span class="bp">self</span><span class="o">.</span><span class="n">from_label</span><span class="p">,</span> 
+                                                                <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">,</span> 
+                                                                <span class="bp">self</span><span class="o">.</span><span class="n">n_conf</span><span class="p">,</span> 
+                                                                <span class="n">workdir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">workdir</span><span class="p">,</span> 
+                                                                <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">)</span>
+            
+            <span class="n">pack_hms</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">workdir</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">),</span>
+                     <span class="bp">self</span><span class="o">.</span><span class="n">n_conf</span><span class="p">,</span>
+                     <span class="s1">&#39;structures/</span><span class="si">%s</span><span class="s1">.hss&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">,</span>
+                     <span class="s1">&#39;violations/</span><span class="si">%s</span><span class="s1">.violations&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">,</span>
+                     <span class="s1">&#39;info/</span><span class="si">%s</span><span class="s1">.info&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_completed</span><span class="p">,</span> <span class="n">n_violated</span><span class="p">))</span>
+
+        <span class="k">except</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()))</span>
+            
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">minimization_process</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="ModelingStep"><a class="viewcode-back" href="../../wrappers.html#lammps_hic.wrappers.ModelingStep">[docs]</a><span class="k">class</span> <span class="nc">ModelingStep</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    :Constructor Arguments:</span>
+<span class="sd">        *from_label (string)*</span>
+<span class="sd">            last iteration label</span>
+<span class="sd">        *to_label (string)*</span>
+<span class="sd">            label for the iteration to be performed</span>
+<span class="sd">        *n_conf (int)*</span>
+<span class="sd">            number of total structures in the population</span>
+<span class="sd">        *workdir (string)*</span>
+<span class="sd">            directory containing the *hms* structure files. New files</span>
+<span class="sd">            will be also written here.</span>
+<span class="sd">        *\*\*kwargs*</span>
+<span class="sd">            additional arguments to be passed to the</span>
+<span class="sd">            **lammps_hic.lammps.bulk_minimize_single_file** function. </span>
+<span class="sd">            See lammps_hic.lammps documentation for details</span>
+
+<span class="sd">    Wrapper around multiprocessing and the lammps_hic.lammps module.</span>
+<span class="sd">    Calling its member **run** function spawns a separate process,</span>
+<span class="sd">    which will be responsible to connect to the ipyparallel controller</span>
+<span class="sd">    and perform the parallel minimization of the structures.</span>
+
+<span class="sd">    A modeling step requires *n_conf* files in the *workdir* directory,</span>
+<span class="sd">    containing the starting coordinates. </span>
+<span class="sd">    The starting file names are expected to be in the </span>
+<span class="sd">    *from_label*_*n*.hms format, where *n* goes from 0 to *n_conf* - 1.</span>
+
+<span class="sd">    It also requires writable **logs**, **structures**, **info** and</span>
+<span class="sd">    **violations** directories. </span>
+
+<span class="sd">    The **run** function is syncronous and waits for the whole</span>
+<span class="sd">    minimization to complete. A log file logs/*to_label*.log</span>
+<span class="sd">    is updated every ~60 seconds during minimization.</span>
+
+<span class="sd">    If the minimization is successful, *failed* is set to False</span>
+<span class="sd">    and *n_violated* is set to the number of structures with</span>
+<span class="sd">    significant violations. </span>
+
+<span class="sd">    A successful minimization will generate the following files:</span>
+
+<span class="sd">    * structures/&lt;to_label&gt;.hss</span>
+
+<span class="sd">    * violations/&lt;to_label&gt;.violations</span>
+
+<span class="sd">    * info/&lt;to_label&gt;.info</span>
+
+<span class="sd">    * logs/*&lt;to_label&gt;*.log  </span>
+
+<span class="sd">    * &lt;n_conf&gt; files, named &lt;workdir&gt;/&lt;to_label&gt;_&lt;n&gt;.hms, </span>
+<span class="sd">      with 0 &lt;= n &lt; *n_conf* </span>
+
+<span class="sd">    Note that the hms files are redundant, as all the information</span>
+<span class="sd">    is packed in the other files after the run. **They are however still </span>
+<span class="sd">    needed as starting configurations in the next minimization step**.</span>
+
+<span class="sd">    A failed minimization will set the *failed* member to True, and </span>
+<span class="sd">    store the formatted traceback string in the *error* member variable.</span>
+
+<span class="sd">        </span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">from_label</span><span class="p">,</span> <span class="n">to_label</span><span class="p">,</span> <span class="n">n_conf</span><span class="p">,</span> <span class="n">workdir</span><span class="o">=</span><span class="s2">&quot;tmp&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span> <span class="o">=</span> <span class="n">ModelingStepProcess</span><span class="p">(</span><span class="n">queue</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="p">,</span>
+                                        <span class="n">from_label</span><span class="o">=</span><span class="n">from_label</span><span class="p">,</span>
+                                        <span class="n">to_label</span><span class="o">=</span><span class="n">to_label</span><span class="p">,</span>
+                                        <span class="n">n_conf</span><span class="o">=</span><span class="n">n_conf</span><span class="p">,</span>
+                                        <span class="n">workdir</span><span class="o">=</span><span class="n">workdir</span><span class="p">,</span>
+                                        <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">results</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_violated</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        On a successful run, is set to the number of structures</span>
+<span class="sd">        with violated restraints. Details of violations can be found</span>
+<span class="sd">        in the *violations/&lt;to_label&gt;.violations* file</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">error</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        If the run fails, error is set to the formatted backtrace</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">failed</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Set to True/False at the end of the run.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logfile</span> <span class="o">=</span> <span class="s1">&#39;logs/&#39;</span> <span class="o">+</span> <span class="n">to_label</span> <span class="o">+</span> <span class="s1">&#39;.log&#39;</span>
+
+<div class="viewcode-block" id="ModelingStep.run"><a class="viewcode-back" href="../../wrappers.html#lammps_hic.wrappers.ModelingStep.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Starts the minimization process and wait for it to complete.</span>
+<span class="sd">        Sets the **failed** befor returning.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+        <span class="n">FORMAT</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="si">%(asctime)-15s</span><span class="s2">:</span><span class="si">%(levelname)s</span><span class="s2">:</span><span class="si">%(message)s</span><span class="s2">&quot;</span>
+        <span class="n">fh</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">FileHandler</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">logfile</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="n">FORMAT</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Starting Modeling Step&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Modeling Step completed&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">removeHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">failed</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;completed: </span><span class="si">%d</span><span class="s1">   violated: </span><span class="si">%d</span><span class="s1">&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">n_violated</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">failed</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">error</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="k">return</span> <span class="kc">False</span></div></div>
+        
+            
+<span class="k">class</span> <span class="nc">ActivationDistancesProcess</span><span class="p">(</span><span class="n">multiprocessing</span><span class="o">.</span><span class="n">Process</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">queue</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">ModelingStepProcess</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">queue</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">from_label</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;from_label&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;to_label&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">theta</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;theta&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">matrix</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;matrix&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scatter</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;scatter&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_process</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        set logger and client</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="kn">import</span> <span class="nn">zmq</span>
+        <span class="kn">import</span> <span class="nn">traceback</span>
+        <span class="kn">from</span> <span class="nn">ipyparallel</span> <span class="k">import</span> <span class="n">Client</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">rcl</span> <span class="o">=</span> <span class="n">Client</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="n">zmq</span><span class="o">.</span><span class="n">Context</span><span class="p">())</span>  <span class="c1"># Using a fresh context!</span>
+            <span class="kn">from</span> <span class="nn">lammps_hic.actdist</span> <span class="k">import</span> <span class="n">get_actdists</span>
+            <span class="n">ad</span> <span class="o">=</span> <span class="n">get_actdists</span><span class="p">(</span><span class="n">rcl</span><span class="p">,</span>
+                             <span class="s1">&#39;./structures/</span><span class="si">%s</span><span class="s1">.hss&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">from_label</span><span class="p">,</span>
+                             <span class="bp">self</span><span class="o">.</span><span class="n">matrix</span><span class="p">,</span>
+                             <span class="n">theta</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">theta</span><span class="p">,</span>
+                             <span class="n">last_ad</span><span class="o">=</span><span class="s1">&#39;ActDist/</span><span class="si">%s</span><span class="s1">.actDist&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">from_label</span><span class="p">,</span>
+                             <span class="n">save_to</span><span class="o">=</span><span class="s1">&#39;ActDist/</span><span class="si">%s</span><span class="s1">.actDist&#39;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_label</span><span class="p">,</span>
+                             <span class="n">scatter</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scatter</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">ad</span><span class="p">)))</span>
+
+        <span class="k">except</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">()))</span>
+            
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process</span><span class="p">()</span>
+
+
+<span class="k">class</span> <span class="nc">ActivationDistancesStep</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    :Constructor Arguments:</span>
+<span class="sd">        *from_label (string)*</span>
+<span class="sd">            last iteration label</span>
+<span class="sd">        *to_label (string)*</span>
+<span class="sd">            label for the iteration to be performed</span>
+<span class="sd">        *theta (float)*</span>
+<span class="sd">            Considers only contact probabilities greater than theta</span>
+<span class="sd">        *matrix (numpy matrix)*</span>
+<span class="sd">            Matrix of contact probabilities. </span>
+<span class="sd">            TODO: </span>
+<span class="sd">            * read filename on the process</span>
+<span class="sd">            * use a sparse matrix</span>
+<span class="sd">        *scatter (int)*</span>
+<span class="sd">            Level of granularity in parallel load subdivision. See</span>
+<span class="sd">            additional explanation in the lammps.actdist documentation.</span>
+<span class="sd">            A value ~10 should be good for most of the situations.</span>
+
+<span class="sd">    Wrapper around multiprocessing and the lammps_hic.actdist module.</span>
+<span class="sd">    Calling its member **run** function spawns a separate process,</span>
+<span class="sd">    which will be responsible to connect to the ipyparallel controller</span>
+<span class="sd">    and perform the parallel calculation of activation distances.</span>
+
+<span class="sd">    The activation distances step requires a population structures</span>
+<span class="sd">    file (.hss) and the last activation distances. It ouputs a log </span>
+<span class="sd">    and the new actdist file. See documentation for </span>
+<span class="sd">    lammps_hic.actdist for details on the actdist format.</span>
+
+<span class="sd">    :Required files:</span>
+
+<span class="sd">        * structures/&lt;from_label&gt;.hss</span>
+<span class="sd">        </span>
+<span class="sd">        * ActDist/&lt;from_label&gt;.actDist</span>
+
+<span class="sd">        * A probability matrix file</span>
+
+<span class="sd">    :Output files:</span>
+
+<span class="sd">        * ActDist/&lt;to_label&gt;.actDist</span>
+
+<span class="sd">        * logs/&lt;to_label&gt;.actdist.log</span>
+
+<span class="sd">    </span>
+<span class="sd">    The **run** function is syncronous and waits for the whole</span>
+<span class="sd">    computation to complete. A log file logs/*to_label*.actdist.log</span>
+<span class="sd">    is updated every ~60 seconds during minimization.</span>
+
+<span class="sd">    If the computation is successful, *failed* is set to False</span>
+<span class="sd">    and *n_ad* is set to the number of records in the activation</span>
+<span class="sd">    distances file.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">from_label</span><span class="p">,</span> <span class="n">to_label</span><span class="p">,</span> <span class="n">matrix</span><span class="p">,</span> <span class="n">theta</span><span class="p">,</span> <span class="n">scatter</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span> <span class="o">=</span> <span class="n">ActivationDistancesProcess</span><span class="p">(</span><span class="n">queue</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="p">,</span>
+                                               <span class="n">from_label</span><span class="o">=</span><span class="n">from_label</span><span class="p">,</span>
+                                               <span class="n">to_label</span><span class="o">=</span><span class="n">to_label</span><span class="p">,</span>
+                                               <span class="n">matrix</span><span class="o">=</span><span class="n">matrix</span><span class="p">,</span>
+                                               <span class="n">theta</span><span class="o">=</span><span class="n">theta</span><span class="p">,</span>
+                                               <span class="n">scatter</span><span class="o">=</span><span class="n">scatter</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">results</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_ad</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">error</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">failed</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logfile</span> <span class="o">=</span> <span class="s1">&#39;logs/&#39;</span> <span class="o">+</span> <span class="n">to_label</span> <span class="o">+</span> <span class="s1">&#39;.actdist.log&#39;</span>
+
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+        <span class="n">FORMAT</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="si">%(asctime)-15s</span><span class="s2">:</span><span class="si">%(levelname)s</span><span class="s2">:</span><span class="si">%(message)s</span><span class="s2">&quot;</span>
+        <span class="n">fh</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">FileHandler</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">logfile</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">Formatter</span><span class="p">(</span><span class="n">FORMAT</span><span class="p">))</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Starting Activation Distances step&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proc</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Activation Distances step completed&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">removeHandler</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Number of processed pairs: </span><span class="si">%d</span><span class="s1">&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">n_ad</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">failed</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">error</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="k">return</span> <span class="kc">False</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

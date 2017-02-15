@@ -1,0 +1,178 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>&lt;no title&gt; &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <span class="target" id="module-lammps_hic.lammps"></span><dl class="class">
+<dt id="lammps_hic.lammps.Bond">
+<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">Bond</code><span class="sig-paren">(</span><em>b_id</em>, <em>bond_type</em>, <em>i</em>, <em>j</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#Bond"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.Bond" title="Permalink to this definition">¶</a></dt>
+<dd><p>A bond between two atoms. The indexes are saved in
+the 0, N-1 index, while the string is in the 1..N lammps
+format.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="lammps_hic.lammps.BondContainer">
+<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">BondContainer</code><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer" title="Permalink to this definition">¶</a></dt>
+<dd><p>A container to avoid keeping track of ids and duplicates.
+The dictionary for the types is to avoid re-use of 
+bond_types.
+This way, the check should be amortized O(1)</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="lammps_hic.lammps.BondType">
+<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">BondType</code><span class="sig-paren">(</span><em>b_id</em>, <em>type_str</em>, <em>kspring</em>, <em>r0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondType"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondType" title="Permalink to this definition">¶</a></dt>
+<dd><p>A bond type. The indexes are saved in
+the 0, N-1 index, while the string is in the 1..N lammps
+format.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="lammps_hic.lammps.DummyAtoms">
+<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">DummyAtoms</code><span class="sig-paren">(</span><em>n_atoms</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#DummyAtoms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.DummyAtoms" title="Permalink to this definition">¶</a></dt>
+<dd><p>this needs an explanation. To enforce distance from center,
+we use a bond with a dummy atom in the middle. Hovever, if we use
+the same atom for too many bonds, the dummy atom will set the
+max_bonds parameter for all atoms to a very large number,
+making memory usage explode. Hence, it&#8217;s better to have multiple
+dummy atoms</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.bulk_minimize_single_file">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">bulk_minimize_single_file</code><span class="sig-paren">(</span><em>parallel_client</em>, <em>old_prefix</em>, <em>new_prefix</em>, <em>n_struct</em>, <em>workdir='.'</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>ignore_restart=False</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#bulk_minimize_single_file"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.bulk_minimize_single_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Uses ipyparallel to minimize n_struct structures.
+parallel_client is an instance of ipyparallel.Client
+The filenames are expected to be in the form
+prefix_&lt;structure id&gt;.hms 
+Maps the minimization to the workers and return statistics
+for the whole run. If one or more of the minimizations
+fails, it will raise a RuntimeError.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.generate_input">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">generate_input</code><span class="sig-paren">(</span><em>crd</em>, <em>bead_radii</em>, <em>chrom</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#generate_input"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.generate_input" title="Permalink to this definition">¶</a></dt>
+<dd><p>From coordinates of the beads, their radii
+and the list of relative chrmosomes, it constructs the
+input files for running a minimization. Has various arguments,
+the ones in the ARG_DEFAULT dictionary. This is a quite long
+function, performing the parsing and the output.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.get_info_from_log">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">get_info_from_log</code><span class="sig-paren">(</span><em>output</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#get_info_from_log"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.get_info_from_log" title="Permalink to this definition">¶</a></dt>
+<dd><p>gets final energy, excluded volume energy and bond energy.
+TODO: get more info?</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.lammps_minimize">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">lammps_minimize</code><span class="sig-paren">(</span><em>crd</em>, <em>radii</em>, <em>chrom</em>, <em>run_name</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#lammps_minimize"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.lammps_minimize" title="Permalink to this definition">¶</a></dt>
+<dd><p>lammps_minimize: calls lammps on files on
+/dev/shm for performance, and checks execution
+result and final energies</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.serial_lammps_call">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">serial_lammps_call</code><span class="sig-paren">(</span><em>largs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#serial_lammps_call"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.serial_lammps_call" title="Permalink to this definition">¶</a></dt>
+<dd><p>Serial function to be mapped in parallel. 
+largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) 
+Reads parameters and coordinates from disk, perform minimization,
+and return run information in a dictionary (see get_info_from_log).
+In case of failure, gracefully returns None and the traceback.</p>
+</dd></dl>
+
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/lammps.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

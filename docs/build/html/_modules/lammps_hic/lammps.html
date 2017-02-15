@@ -1,0 +1,1114 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>lammps_hic.lammps &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for lammps_hic.lammps</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">os.path</span>
+<span class="kn">import</span> <span class="nn">h5py</span>
+<span class="kn">import</span> <span class="nn">math</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">concurrent.futures</span>
+<span class="kn">from</span> <span class="nn">numpy.linalg</span> <span class="k">import</span> <span class="n">norm</span>
+<span class="kn">from</span> <span class="nn">io</span> <span class="k">import</span> <span class="n">StringIO</span>
+<span class="kn">from</span> <span class="nn">subprocess</span> <span class="k">import</span> <span class="n">Popen</span><span class="p">,</span> <span class="n">PIPE</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">cPickle</span> <span class="k">as</span> <span class="nn">pickle</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">pickle</span>
+
+
+<span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">read_hss</span><span class="p">,</span> <span class="n">write_hss</span><span class="p">,</span> <span class="n">read_full_actdist</span>
+<span class="kn">from</span> <span class="nn">.util</span> <span class="k">import</span> <span class="n">monitor_progress</span><span class="p">,</span> <span class="n">pretty_tdelta</span>
+<span class="kn">from</span> <span class="nn">.globals</span> <span class="k">import</span> <span class="n">lammps_executable</span><span class="p">,</span> <span class="n">float_epsilon</span>
+
+
+<span class="n">ARG_DEFAULT</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;nucleus_radius&#39;</span><span class="p">:</span> <span class="mf">5000.0</span><span class="p">,</span>
+    <span class="s1">&#39;occupancy&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">,</span>
+    <span class="s1">&#39;actdist&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;fish&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;damid&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;out&#39;</span><span class="p">:</span> <span class="s1">&#39;out.lammpstrj&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="s1">&#39;input.data&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;lmp&#39;</span><span class="p">:</span> <span class="s1">&#39;minimize.lam&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;apprestr&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;contact_kspring&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="s1">&#39;contact_range&#39;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">,</span>
+    <span class="s1">&#39;fish_type&#39;</span><span class="p">:</span> <span class="s1">&#39;rRpP&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;fish_kspring&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="s1">&#39;fish_tol&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+    <span class="s1">&#39;damid_kspring&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="s1">&#39;damid_tol&#39;</span><span class="p">:</span> <span class="mf">50.0</span><span class="p">,</span>
+    <span class="s1">&#39;mdsteps&#39;</span><span class="p">:</span> <span class="mi">20000</span><span class="p">,</span>
+    <span class="s1">&#39;timestep&#39;</span><span class="p">:</span> <span class="mf">0.25</span><span class="p">,</span>
+    <span class="s1">&#39;tstart&#39;</span><span class="p">:</span> <span class="mf">20.0</span><span class="p">,</span>
+    <span class="s1">&#39;tstop&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="s1">&#39;damp&#39;</span><span class="p">:</span> <span class="mf">50.0</span><span class="p">,</span>
+    <span class="s1">&#39;seed&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">100000000</span><span class="p">),</span>
+    <span class="s1">&#39;write&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s1">&#39;thermo&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
+    <span class="s1">&#39;max_velocity&#39;</span><span class="p">:</span> <span class="mf">5.0</span><span class="p">,</span>
+    <span class="s1">&#39;evfactor&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+    <span class="s1">&#39;max_neigh&#39;</span><span class="p">:</span> <span class="mi">2000</span><span class="p">,</span>
+    <span class="s1">&#39;max_cg_iter&#39;</span><span class="p">:</span> <span class="mi">500</span><span class="p">,</span>
+    <span class="s1">&#39;max_cg_eval&#39;</span><span class="p">:</span> <span class="mi">500</span><span class="p">,</span>
+    <span class="s1">&#39;etol&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span>
+    <span class="s1">&#39;ftol&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">6</span><span class="p">,</span>
+    <span class="s1">&#39;territories&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="s1">&#39;soft_min&#39;</span><span class="p">:</span> <span class="mi">0</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="BondType"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondType">[docs]</a><span class="k">class</span> <span class="nc">BondType</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;A bond type. The indexes are saved in</span>
+<span class="sd">    the 0, N-1 index, while the string is in the 1..N lammps</span>
+<span class="sd">    format.&#39;&#39;&#39;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b_id</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="p">,</span> <span class="n">r0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">b_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span> <span class="o">=</span> <span class="n">kspring</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span> <span class="o">=</span> <span class="n">type_str</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">r0</span> <span class="o">=</span> <span class="n">r0</span> 
+
+    <span class="k">def</span> <span class="nf">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">r0</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span> 
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">r0</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">r0</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">kspring</span> <span class="ow">and</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">type_str</span><span class="p">)</span>  
+
+
+    <span class="k">def</span> <span class="nf">__hash__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">hash</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">r0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="Bond"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.Bond">[docs]</a><span class="k">class</span> <span class="nc">Bond</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;A bond between two atoms. The indexes are saved in</span>
+<span class="sd">    the 0, N-1 index, while the string is in the 1..N lammps</span>
+<span class="sd">    format.&#39;&#39;&#39;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b_id</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">b_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bond_type</span> <span class="o">=</span> <span class="n">bond_type</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">i</span> <span class="o">=</span> <span class="n">i</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">j</span> <span class="o">=</span> <span class="n">j</span>
+
+    <span class="k">def</span> <span class="nf">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">bond_type</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                                    <span class="bp">self</span><span class="o">.</span><span class="n">j</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span> 
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">__dict__</span></div>
+
+
+<div class="viewcode-block" id="BondContainer"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer">[docs]</a><span class="k">class</span> <span class="nc">BondContainer</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;A container to avoid keeping track of ids and duplicates.</span>
+<span class="sd">    The dictionary for the types is to avoid re-use of </span>
+<span class="sd">    bond_types.</span>
+<span class="sd">    This way, the check should be amortized O(1)&#39;&#39;&#39;</span>
+    
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span> <span class="nf">add_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+
+        <span class="n">bt</span> <span class="o">=</span> <span class="n">BondType</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">),</span>
+                      <span class="n">type_str</span><span class="p">,</span>
+                      <span class="n">kspring</span><span class="p">,</span>
+                      <span class="n">r0</span><span class="p">)</span>
+
+        <span class="n">old_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">bt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">old_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bt</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span><span class="p">[</span><span class="n">bt</span><span class="p">]</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">id</span>
+            <span class="k">return</span> <span class="n">bt</span>
+        <span class="k">else</span><span class="p">:</span> 
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">old_id</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">add_bond</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+        <span class="n">bond</span> <span class="o">=</span> <span class="n">Bond</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="p">),</span>
+                    <span class="n">bond_type</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">i</span><span class="p">,</span>
+                    <span class="n">j</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bond</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">bond</span></div>
+
+
+<div class="viewcode-block" id="DummyAtoms"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.DummyAtoms">[docs]</a><span class="k">class</span> <span class="nc">DummyAtoms</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;this needs an explanation. To enforce distance from center,</span>
+<span class="sd">    we use a bond with a dummy atom in the middle. Hovever, if we use</span>
+<span class="sd">    the same atom for too many bonds, the dummy atom will set the</span>
+<span class="sd">    max_bonds parameter for all atoms to a very large number,</span>
+<span class="sd">    making memory usage explode. Hence, it&#39;s better to have multiple</span>
+<span class="sd">    dummy atoms&#39;&#39;&#39;</span>
+    <span class="n">max_bonds</span> <span class="o">=</span> <span class="mi">10</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_atoms</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_atoms</span> <span class="o">=</span> <span class="n">n_atoms</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">counter</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_dummy</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span> <span class="nf">next</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">counter</span> <span class="o">%</span> <span class="n">DummyAtoms</span><span class="o">.</span><span class="n">max_bonds</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">n_dummy</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">counter</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_dummy</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_atoms</span> <span class="o">-</span> <span class="mi">1</span></div>
+
+
+<span class="k">def</span> <span class="nf">_chromosome_string_to_numeric_id</span><span class="p">(</span><span class="n">chrom</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;Transform a list of strings in numeric</span>
+<span class="sd">    ids (from 1 to N). Multiple chromosome copies</span>
+<span class="sd">    will have the same id&#39;&#39;&#39;</span>
+    <span class="n">chr_map</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">chrom_id</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">chrom</span><span class="p">:</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;chr&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="n">chr_map</span><span class="p">[</span><span class="n">z</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="n">n</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="n">chr_map</span><span class="p">[</span><span class="n">z</span><span class="p">]</span> <span class="o">=</span> <span class="n">n</span>
+            <span class="n">hv</span> <span class="o">=</span> <span class="n">n</span>
+        <span class="n">chrom_id</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">chrom_id</span>
+
+
+<div class="viewcode-block" id="generate_input"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.generate_input">[docs]</a><span class="k">def</span> <span class="nf">generate_input</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">bead_radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;From coordinates of the beads, their radii</span>
+<span class="sd">    and the list of relative chrmosomes, it constructs the</span>
+<span class="sd">    input files for running a minimization. Has various arguments,</span>
+<span class="sd">    the ones in the ARG_DEFAULT dictionary. This is a quite long</span>
+<span class="sd">    function, performing the parsing and the output. &#39;&#39;&#39;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+    <span class="n">args</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ARG_DEFAULT</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">args</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;write&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">args</span><span class="p">[</span><span class="s1">&#39;write&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;mdsteps&#39;</span><span class="p">]</span>  <span class="c1"># write only final step</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># this is only because it may be passed as string</span>
+        <span class="n">args</span><span class="p">[</span><span class="s1">&#39;write&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;write&#39;</span><span class="p">])</span>
+
+    <span class="n">chromid</span> <span class="o">=</span> <span class="n">_chromosome_string_to_numeric_id</span><span class="p">(</span><span class="n">chrom</span><span class="p">)</span>
+
+    <span class="n">n_hapl</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span>
+    <span class="n">n_atoms</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">)</span>
+    <span class="n">x1</span> <span class="o">=</span> <span class="n">crd</span><span class="p">[:</span><span class="n">n_hapl</span><span class="p">]</span>
+    <span class="n">x2</span> <span class="o">=</span> <span class="n">crd</span><span class="p">[</span><span class="n">n_hapl</span><span class="p">:]</span>
+    <span class="k">assert</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">x1</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">x2</span><span class="p">))</span>
+
+    <span class="c1"># Harmonic Upper Bond Coefficients are one for each bond type</span>
+    <span class="c1"># and coded as:</span>
+    <span class="c1">#   Bond_type_id kspring activation_distance</span>
+    <span class="c1"># Each bond is coded as:</span>
+    <span class="c1">#   Bond_id Bond_type_id ibead jbead</span>
+
+    <span class="n">bond_list</span> <span class="o">=</span> <span class="n">BondContainer</span><span class="p">()</span>
+    <span class="n">dummies</span> <span class="o">=</span> <span class="n">DummyAtoms</span><span class="p">(</span><span class="n">n_atoms</span><span class="p">)</span>
+
+    <span class="c1"># first, determine atom types by radius</span>
+    <span class="n">atom_types_ids</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">at</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">atom_types</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">n_atoms</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">):</span>
+        <span class="n">aid</span> <span class="o">=</span> <span class="n">atom_types_ids</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">aid</span> <span class="o">==</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">at</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">atom_types_ids</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="o">=</span> <span class="n">at</span>
+            <span class="n">aid</span> <span class="o">=</span> <span class="n">at</span>
+        <span class="n">atom_types</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">aid</span>
+    <span class="n">n_bead_types</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">atom_types_ids</span><span class="p">)</span>
+
+    <span class="c1">###############################</span>
+    <span class="c1"># Add consecutive beads bonds #</span>
+    <span class="c1">###############################</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_atoms</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">chrom</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">==</span> <span class="n">chrom</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]:</span>
+            <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span> 
+                                    <span class="n">kspring</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> 
+                                    <span class="n">r0</span><span class="o">=</span><span class="mi">2</span><span class="o">*</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">+</span><span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]))</span>
+            <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1">##############################</span>
+    <span class="c1"># Add chromosome territories #</span>
+    <span class="c1">##############################</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;territories&#39;</span><span class="p">]:</span>
+        <span class="c1"># for the territories step we want to make chromosomes very dense (3x?)</span>
+        <span class="n">terr_occupancy</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;occupancy&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="mi">3</span>
+        <span class="n">chrom_start</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_atoms</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">chrom</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">!=</span> <span class="n">chrom</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]:</span>
+                <span class="n">chrom_start</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="n">chrom_start</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">n_atoms</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">chrom_start</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">nnbnds</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">chrom_len</span> <span class="o">=</span> <span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+            <span class="n">chr_radii</span> <span class="o">=</span> <span class="n">bead_radii</span><span class="p">[</span><span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span><span class="p">]:</span><span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]]</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="mf">4.0</span> <span class="o">*</span> <span class="nb">sum</span><span class="p">(</span><span class="n">chr_radii</span><span class="p">)</span> <span class="o">/</span> <span class="n">chrom_len</span>  <span class="c1"># 4 times the average radius</span>
+            <span class="n">d</span> <span class="o">*=</span> <span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">chrom_len</span><span class="p">)</span> <span class="o">/</span> <span class="n">terr_occupancy</span><span class="p">)</span><span class="o">**</span><span class="p">(</span><span class="mf">1.</span> <span class="o">/</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                    <span class="n">kspring</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+                                    <span class="n">r0</span><span class="o">=</span><span class="n">d</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span><span class="p">],</span> <span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;territories&#39;</span><span class="p">]):</span>
+                <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;territories&#39;</span><span class="p">],</span> <span class="n">chrom_start</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;territories&#39;</span><span class="p">]):</span>
+                    <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                    <span class="n">nnbnds</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1">##############################################</span>
+    <span class="c1"># Activation distance for contact restraints #</span>
+    <span class="c1">##############################################</span>
+    <span class="c1"># NOTE: activation distances are surface to surface, not center to center</span>
+    <span class="c1"># The old method was using minimum pairs</span>
+    <span class="c1"># Here we enforce a single pair.</span>
+    <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">],</span> <span class="n">unicode</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">actdists</span> <span class="o">=</span> <span class="n">read_full_actdist</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">actdists</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">actdists</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;actdist&#39;</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">pwish</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">pnow</span><span class="p">)</span> <span class="ow">in</span> <span class="n">actdists</span><span class="p">:</span>
+            <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+            <span class="n">rsph</span> <span class="o">=</span> <span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">bead_radii</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+            <span class="n">dcc</span> <span class="o">=</span> <span class="n">d</span> <span class="o">+</span> <span class="n">rsph</span>  <span class="c1"># center to center distance</span>
+
+            <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+            <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+            <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+            <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+
+            <span class="c1"># find closest distance and remove incompatible contacts</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">cd</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">&gt;</span> <span class="n">dcc</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># we have at least one bond to enforce</span>
+            <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                    <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;contact_kspring&#39;</span><span class="p">],</span>
+                                    <span class="n">r0</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;contact_range&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">rsph</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+
+            <span class="c1"># add bonds</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+
+    <span class="c1">#############################################</span>
+    <span class="c1"># Activation distances for damid restraints #</span>
+    <span class="c1">#############################################</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid&#39;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid&#39;</span><span class="p">],</span> <span class="n">unicode</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid&#39;</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">damid_actdists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">genfromtxt</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid&#39;</span><span class="p">],</span>
+                                               <span class="n">usecols</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>
+                                               <span class="n">dtype</span><span class="o">=</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">damid_actdists</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">():</span>
+                    <span class="n">damid_actdists</span> <span class="o">=</span> <span class="p">[</span><span class="n">damid_actdists</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">damid_actdists</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">damid_actdists</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">item</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="n">item</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+            <span class="c1"># target minimum distance</span>
+            <span class="n">td</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;nucleus_radius&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+            <span class="c1"># current distances</span>
+            <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;nucleus_radius&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+            <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;nucleus_radius&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">cd</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">&gt;</span> <span class="n">d</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># we have at least one bond to enforce</span>
+            <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
+                                    <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;damid_kspring&#39;</span><span class="p">],</span>
+                                    <span class="n">r0</span><span class="o">=</span><span class="n">td</span><span class="p">)</span>
+
+            <span class="c1"># add bonds</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">d</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">d</span><span class="p">:</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+
+    <span class="c1">###############################################</span>
+    <span class="c1"># Add bonds for fish restraints, if specified #</span>
+    <span class="c1">###############################################</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">hff</span> <span class="o">=</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish&#39;</span><span class="p">],</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span>
+        <span class="n">minradial</span> <span class="o">=</span> <span class="s1">&#39;r&#39;</span> <span class="ow">in</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_type&#39;</span><span class="p">]</span>
+        <span class="n">maxradial</span> <span class="o">=</span> <span class="s1">&#39;R&#39;</span> <span class="ow">in</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_type&#39;</span><span class="p">]</span>
+        <span class="n">minpair</span> <span class="o">=</span> <span class="s1">&#39;p&#39;</span> <span class="ow">in</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_type&#39;</span><span class="p">]</span>
+        <span class="n">maxpair</span> <span class="o">=</span> <span class="s1">&#39;P&#39;</span> <span class="ow">in</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_type&#39;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">minradial</span><span class="p">:</span>
+            <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">probes</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;probes&#39;</span><span class="p">]</span>
+            <span class="n">minradial_dist</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;radial_min&#39;</span><span class="p">][:,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">]]</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">probes</span><span class="p">):</span>
+                <span class="n">td</span> <span class="o">=</span> <span class="n">minradial_dist</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">td</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="n">td</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+
+        <span class="k">if</span> <span class="n">maxradial</span><span class="p">:</span>
+            <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">probes</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;probes&#39;</span><span class="p">]</span>
+            <span class="n">maxradial_dist</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;radial_max&#39;</span><span class="p">][:,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">]]</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">probes</span><span class="p">):</span>
+                <span class="n">td</span> <span class="o">=</span> <span class="n">maxradial_dist</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="n">td</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">td</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+
+        <span class="k">if</span> <span class="n">minpair</span><span class="p">:</span>
+            <span class="n">pairs</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;pairs&#39;</span><span class="p">]</span>
+            <span class="n">minpair_dist</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;pair_min&#39;</span><span class="p">][:,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">]]</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pairs</span><span class="p">):</span>
+                <span class="n">dmin</span> <span class="o">=</span> <span class="n">minpair_dist</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+
+                <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">dmin</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="n">dmin</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
+                <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">cd</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="k">if</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">idx</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">jj</span> <span class="o">=</span> <span class="n">j</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">jj</span> <span class="o">=</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">jj</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">maxpair</span><span class="p">:</span>
+            <span class="n">pairs</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;pairs&#39;</span><span class="p">]</span>
+            <span class="n">maxpair_dist</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;pair_max&#39;</span><span class="p">][:,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">]]</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pairs</span><span class="p">):</span>
+                <span class="n">dmax</span> <span class="o">=</span> <span class="n">maxpair_dist</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+
+                <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x2</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+                <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">x2</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">x1</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="n">dmax</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+
+                <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
+                                        <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
+                                        <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">dmax</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
+                <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">cd</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">idx</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">idx</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">ii</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="k">if</span> <span class="n">idx</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">idx</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">jj</span> <span class="o">=</span> <span class="n">j</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">jj</span> <span class="o">=</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">jj</span><span class="p">)</span>
+        <span class="n">hff</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="c1">############################</span>
+    <span class="c1"># Create LAMMPS input file #</span>
+    <span class="c1">############################</span>
+
+    <span class="n">n_bonds</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">)</span>
+    <span class="n">n_bondtypes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bond_types</span><span class="p">)</span>
+    <span class="n">dummy_type</span> <span class="o">=</span> <span class="n">n_bead_types</span> <span class="o">+</span> <span class="mi">1</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">],</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;LAMMPS input</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="n">n_atoms</span> <span class="o">+</span> <span class="n">dummies</span><span class="o">.</span><span class="n">n_dummy</span><span class="p">,</span> <span class="s1">&#39;atoms</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">n_bead_types</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;atom types</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">n_bondtypes</span><span class="p">,</span> <span class="s1">&#39;bond types</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">n_bonds</span><span class="p">,</span> <span class="s1">&#39;bonds</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># keeping some free space to be sure</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;-6000 6000 xlo xhi</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;-6000 6000 ylo yhi</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;-6000 6000 zlo zhi&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">Atoms</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="c1"># index, molecule, atom type, x y z.</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">crd</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">chromid</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">atom_types</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        
+        <span class="c1"># dummy atoms in the middle</span>
+        <span class="n">dummy_mol</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">chromid</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">dummies</span><span class="o">.</span><span class="n">n_dummy</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">n_atoms</span> <span class="o">+</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dummy_mol</span><span class="p">,</span> <span class="n">dummy_type</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">Bond Coeffs</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">bc</span> <span class="ow">in</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bond_types</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">bc</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">Bonds</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Excluded volume coefficients</span>
+        <span class="n">at_radii</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">atom_types_ids</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">atom_types_ids</span><span class="o">.</span><span class="n">__getitem__</span><span class="p">)]</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">PairIJ Coeffs</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ri</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">at_radii</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">at_radii</span><span class="p">)):</span>
+                <span class="n">rj</span> <span class="o">=</span> <span class="n">at_radii</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> 
+                <span class="n">dc</span> <span class="o">=</span> <span class="p">(</span><span class="n">ri</span> <span class="o">+</span> <span class="n">rj</span><span class="p">)</span>
+                <span class="n">A</span> <span class="o">=</span> <span class="p">(</span><span class="n">dc</span><span class="o">/</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span>
+                <span class="c1">#sigma = dc / 1.1224 #(2**(1.0/6.0))</span>
+                <span class="c1">#print(i+1, args[&#39;evfactor&#39;], sigma, dc, file=f)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">j</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">A</span><span class="o">*</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;evfactor&#39;</span><span class="p">],</span> <span class="n">dc</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">at_radii</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">dummy_type</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+    <span class="c1">##########################</span>
+    <span class="c1"># Create lmp script file #</span>
+    <span class="c1">##########################</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;lmp&#39;</span><span class="p">],</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;units                 lj&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;atom_style            bond&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;bond_style  hybrid&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;boundary              f f f&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Needed to avoid calculation of 3 neighs and 4 neighs</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;special_bonds lj/coul 1.0 1.0 1.0&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+
+        <span class="c1"># excluded volume</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;pair_style soft&#39;</span><span class="p">,</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>  <span class="c1"># global cutoff</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;read_data&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;mass * 1.0&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;group beads type !=&#39;</span><span class="p">,</span> <span class="n">dummy_type</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;group dummy type&#39;</span><span class="p">,</span> <span class="n">dummy_type</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;neighbor&#39;</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">),</span> <span class="s1">&#39;bin&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>  <span class="c1"># skin size</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;neigh_modify every 1 check yes&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;neigh_modify one&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;max_neigh&#39;</span><span class="p">],</span>
+              <span class="s1">&#39;page&#39;</span><span class="p">,</span> <span class="mi">20</span> <span class="o">*</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;max_neigh&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Freeze dummy atom</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;neigh_modify exclude group dummy all&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix 1 dummy setforce 0.0 0.0 0.0&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Integration</span>
+        <span class="c1"># select the integrator</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix 2 beads nve/limit&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;max_velocity&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="c1"># Impose a thermostat - Tstart Tstop tau_decorr seed</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix 3 beads langevin&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;tstart&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;tstop&#39;</span><span class="p">],</span>
+              <span class="n">args</span><span class="p">[</span><span class="s1">&#39;damp&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;seed&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;timestep&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;timestep&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Region</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;region mySphere sphere 0.0 0.0 0.0&#39;</span><span class="p">,</span>
+              <span class="n">args</span><span class="p">[</span><span class="s1">&#39;nucleus_radius&#39;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix wall beads wall/region mySphere harmonic 10.0 1.0 &#39;</span><span class="p">,</span>
+              <span class="mi">2</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1">#print(&#39;pair_modify shift yes mix arithmetic&#39;, file=f)</span>
+
+        <span class="c1"># outputs:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;dump   id beads custom&#39;</span><span class="p">,</span>
+              <span class="n">args</span><span class="p">[</span><span class="s1">&#39;write&#39;</span><span class="p">],</span>
+              <span class="n">args</span><span class="p">[</span><span class="s1">&#39;out&#39;</span><span class="p">],</span>
+              <span class="s1">&#39;id type x y z fx fy fz&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Thermodynamic info style for output</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;thermo_style custom step temp epair ebond&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;thermo&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;thermo&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Run MD</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;run&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;mdsteps&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+        <span class="c1"># Run CG</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;min_style cg&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;minimize&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;etol&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ftol&#39;</span><span class="p">],</span>
+              <span class="n">args</span><span class="p">[</span><span class="s1">&#39;max_cg_iter&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;max_cg_eval&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">bond_list</span></div>
+
+
+<span class="k">def</span> <span class="nf">_check_violations</span><span class="p">(</span><span class="n">bond_list</span><span class="p">,</span> <span class="n">crd</span><span class="p">):</span>
+    <span class="n">violations</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">bond</span> <span class="ow">in</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">:</span>
+        <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">bond_type</span><span class="p">]</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">crd</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">crd</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">d</span> <span class="o">&gt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
+                <span class="n">absv</span> <span class="o">=</span> <span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
+                <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
+                <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">d</span> <span class="o">&lt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
+                <span class="n">absv</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span>
+                <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
+                <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">violations</span>
+
+
+<span class="k">def</span> <span class="nf">_reverse_readline</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">buf_size</span><span class="o">=</span><span class="mi">8192</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;a generator that returns the lines of a file in reverse order&quot;&quot;&quot;</span>
+    <span class="n">segment</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">offset</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">fh</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">SEEK_END</span><span class="p">)</span>
+    <span class="n">file_size</span> <span class="o">=</span> <span class="n">remaining_size</span> <span class="o">=</span> <span class="n">fh</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span>
+    <span class="k">while</span> <span class="n">remaining_size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">offset</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">file_size</span><span class="p">,</span> <span class="n">offset</span> <span class="o">+</span> <span class="n">buf_size</span><span class="p">)</span>
+        <span class="n">fh</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">file_size</span> <span class="o">-</span> <span class="n">offset</span><span class="p">)</span>
+        <span class="n">buffer</span> <span class="o">=</span> <span class="n">fh</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">remaining_size</span><span class="p">,</span> <span class="n">buf_size</span><span class="p">))</span>
+        <span class="n">remaining_size</span> <span class="o">-=</span> <span class="n">buf_size</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">buffer</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="c1"># the first line of the buffer is probably not a complete line so</span>
+        <span class="c1"># we&#39;ll save it and append it to the last line of the next buffer</span>
+        <span class="c1"># we read</span>
+        <span class="k">if</span> <span class="n">segment</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># if the previous chunk starts right from the beginning of line</span>
+            <span class="c1"># do not concact the segment to the last line of new chunk</span>
+            <span class="c1"># instead, yield the segment first</span>
+            <span class="k">if</span> <span class="n">buffer</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">:</span>
+                <span class="n">lines</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+=</span> <span class="n">segment</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">yield</span> <span class="n">segment</span>
+        <span class="n">segment</span> <span class="o">=</span> <span class="n">lines</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">lines</span><span class="p">[</span><span class="n">index</span><span class="p">]):</span>
+                <span class="k">yield</span> <span class="n">lines</span><span class="p">[</span><span class="n">index</span><span class="p">]</span>
+    <span class="c1"># Don&#39;t yield None if the file was empty</span>
+    <span class="k">if</span> <span class="n">segment</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">yield</span> <span class="n">segment</span>
+
+
+<div class="viewcode-block" id="get_info_from_log"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.get_info_from_log">[docs]</a><span class="k">def</span> <span class="nf">get_info_from_log</span><span class="p">(</span><span class="n">output</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39; gets final energy, excluded volume energy and bond energy.</span>
+<span class="sd">    TODO: get more info? &#39;&#39;&#39;</span>
+    <span class="n">info</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">generator</span> <span class="o">=</span> <span class="n">_reverse_readline</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">generator</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">l</span><span class="p">[:</span><span class="mi">9</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;  Force t&#39;</span><span class="p">:</span>
+            <span class="n">ll</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+            <span class="n">info</span><span class="p">[</span><span class="s1">&#39;final-energy&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">ll</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="mi">2</span><span class="p">])</span>
+            <span class="k">break</span>
+
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">generator</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">l</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;Loop&#39;</span><span class="p">:</span>
+            <span class="n">ll</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">epair</span><span class="p">,</span> <span class="n">ebond</span> <span class="o">=</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">ll</span><span class="o">.</span><span class="n">split</span><span class="p">()]</span>
+            <span class="n">info</span><span class="p">[</span><span class="s1">&#39;pair-energy&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">epair</span>
+            <span class="n">info</span><span class="p">[</span><span class="s1">&#39;bond-energy&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ebond</span>
+            <span class="k">break</span>
+    
+    <span class="c1"># EN=`grep -A 1 &quot;Energy initial, next-to-last, final =&quot; $LAMMPSLOGTMP \</span>
+    <span class="c1"># | tail -1 | awk &#39;{print $3}&#39;`</span>
+    <span class="k">return</span> <span class="n">info</span></div>
+
+
+<span class="k">def</span> <span class="nf">get_last_frame</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+    <span class="n">atomlines</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">_reverse_readline</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s1">&#39;ITEM: ATOMS&#39;</span> <span class="ow">in</span> <span class="n">l</span><span class="p">:</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">l</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+            <span class="n">ii</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span>
+            <span class="n">ix</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;x&#39;</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span>
+            <span class="n">iy</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;y&#39;</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span>
+            <span class="n">iz</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s1">&#39;z&#39;</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span>
+            <span class="k">break</span>
+        <span class="n">atomlines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">l</span><span class="p">)</span>
+
+    <span class="n">crds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">atomlines</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">atomlines</span><span class="p">:</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">l</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">ii</span><span class="p">])</span> <span class="o">-</span> <span class="mi">1</span>  <span class="c1"># ids are in range 1-N</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">ix</span><span class="p">])</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">iy</span><span class="p">])</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="n">iz</span><span class="p">])</span>
+        <span class="n">crds</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="n">crds</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">y</span>
+        <span class="n">crds</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">z</span>
+
+    <span class="k">return</span> <span class="n">crds</span>
+
+
+<div class="viewcode-block" id="lammps_minimize"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.lammps_minimize">[docs]</a><span class="k">def</span> <span class="nf">lammps_minimize</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">run_name</span><span class="p">,</span> <span class="n">tmp_files_dir</span><span class="o">=</span><span class="s1">&#39;/dev/shm&#39;</span><span class="p">,</span> <span class="n">log_dir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">check_violations</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39; lammps_minimize: calls lammps on files on</span>
+<span class="sd">    /dev/shm for performance, and checks execution</span>
+<span class="sd">    result and final energies &#39;&#39;&#39;</span>
+
+    <span class="n">data_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.data&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+    <span class="n">script_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lam&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+    <span class="n">traj_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammpstrj&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+
+        <span class="c1"># prepare input</span>
+        <span class="n">opts</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;out&#39;</span><span class="p">:</span> <span class="n">traj_fname</span><span class="p">,</span> <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">data_fname</span><span class="p">,</span> <span class="s1">&#39;lmp&#39;</span><span class="p">:</span> <span class="n">script_fname</span><span class="p">}</span>
+        <span class="n">kwargs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">opts</span><span class="p">)</span>
+        <span class="n">bond_list</span> <span class="o">=</span> <span class="n">generate_input</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="c1"># run the lammps minimization</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">script_fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">lamfile</span><span class="p">:</span>
+            <span class="n">proc</span> <span class="o">=</span> <span class="n">Popen</span><span class="p">([</span><span class="n">lammps_executable</span><span class="p">,</span> <span class="s1">&#39;-log&#39;</span><span class="p">,</span> <span class="s1">&#39;/dev/null&#39;</span><span class="p">],</span>
+                         <span class="n">stdin</span><span class="o">=</span><span class="n">lamfile</span><span class="p">,</span>
+                         <span class="n">stdout</span><span class="o">=</span><span class="n">PIPE</span><span class="p">,</span>
+                         <span class="n">stderr</span><span class="o">=</span><span class="n">PIPE</span><span class="p">)</span>
+            <span class="n">output</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">error_dump</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammps.err&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+            <span class="n">output_dump</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammps.log&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">error_dump</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
+                <span class="n">fd</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_dump</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
+                <span class="n">fd</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;LAMMPS exited with non-zero exit code&#39;</span><span class="p">)</span>
+
+        <span class="c1"># get results</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="n">get_info_from_log</span><span class="p">(</span><span class="n">StringIO</span><span class="p">(</span><span class="n">unicode</span><span class="p">(</span><span class="n">output</span><span class="p">)))</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
+            <span class="n">new_crd</span> <span class="o">=</span> <span class="n">get_last_frame</span><span class="p">(</span><span class="n">fd</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">data_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">data_fname</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">script_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">script_fname</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">)</span>
+
+    <span class="k">except</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">data_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">data_fname</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">script_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">script_fname</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+
+    <span class="k">if</span> <span class="n">check_violations</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">info</span><span class="p">[</span><span class="s1">&#39;bond-energy&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">float_epsilon</span><span class="p">:</span>
+            <span class="n">violations</span> <span class="o">=</span> <span class="n">_check_violations</span><span class="p">(</span><span class="n">bond_list</span><span class="p">,</span> <span class="n">new_crd</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span> 
+            <span class="n">violations</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">return</span> <span class="n">new_crd</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">new_crd</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="p">[]</span></div>
+
+
+<span class="c1"># closure for parallel mapping</span>
+<span class="k">def</span> <span class="nf">parallel_fun</span><span class="p">(</span><span class="n">radius</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">tmp_files_dir</span><span class="o">=</span><span class="s1">&#39;/dev/shm&#39;</span><span class="p">,</span> <span class="n">log_dir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">check_violations</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">inner</span><span class="p">(</span><span class="n">pargs</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">crd</span><span class="p">,</span> <span class="n">run_name</span> <span class="o">=</span> <span class="n">pargs</span>
+            <span class="k">return</span> <span class="n">lammps_minimize</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span>
+                                   <span class="n">radius</span><span class="p">,</span>
+                                   <span class="n">chrom</span><span class="p">,</span>
+                                   <span class="n">run_name</span><span class="p">,</span>
+                                   <span class="n">tmp_files_dir</span><span class="o">=</span><span class="n">tmp_files_dir</span><span class="p">,</span>
+                                   <span class="n">log_dir</span><span class="o">=</span><span class="n">log_dir</span><span class="p">,</span>
+                                   <span class="n">check_violations</span><span class="o">=</span><span class="n">check_violations</span><span class="p">,</span>
+                                   <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="kn">import</span> <span class="nn">sys</span>
+            <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()))</span>
+    <span class="k">return</span> <span class="n">inner</span>
+
+
+<span class="k">def</span> <span class="nf">bulk_minimize</span><span class="p">(</span><span class="n">parallel_client</span><span class="p">,</span>
+                  <span class="n">crd_fname</span><span class="p">,</span>
+                  <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;minimize&#39;</span><span class="p">,</span>
+                  <span class="n">tmp_files_dir</span><span class="o">=</span><span class="s1">&#39;/dev/shm&#39;</span><span class="p">,</span>
+                  <span class="n">log_dir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span>
+                  <span class="n">check_violations</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                  <span class="n">ignore_restart</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                  <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>    
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize() entry&#39;</span><span class="p">)</span>
+
+        <span class="n">engine_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">parallel_client</span><span class="o">.</span><span class="n">ids</span><span class="p">)</span>
+        <span class="n">parallel_client</span><span class="p">[:]</span><span class="o">.</span><span class="n">use_cloudpickle</span><span class="p">()</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): reading data&#39;</span><span class="p">)</span>
+        <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">n_bead</span> <span class="o">=</span> <span class="n">read_hss</span><span class="p">(</span><span class="n">crd_fname</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): done reading data&#39;</span><span class="p">)</span>
+
+        <span class="n">lbv</span> <span class="o">=</span> <span class="n">parallel_client</span><span class="o">.</span><span class="n">load_balanced_view</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">ignore_restart</span><span class="p">:</span>
+            <span class="n">to_minimize</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">))</span>
+            <span class="n">completed</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">):</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Found restart file.&#39;</span><span class="p">)</span>
+                <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">pf</span><span class="p">:</span>
+                    <span class="n">completed</span><span class="p">,</span> <span class="n">errors</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">pf</span><span class="p">)</span>
+                    <span class="n">to_minimize</span> <span class="o">=</span> <span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">errors</span><span class="p">]</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): </span><span class="si">%d</span><span class="s1"> structures yet to minimize&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">to_minimize</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">))</span>
+                <span class="n">completed</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): preparing arguments and function&#39;</span><span class="p">)</span>
+        <span class="n">pargs</span> <span class="o">=</span> <span class="p">[(</span><span class="n">crd</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.&#39;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">))</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">to_minimize</span><span class="p">]</span> 
+        <span class="n">f</span> <span class="o">=</span> <span class="n">parallel_fun</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">,</span> <span class="n">check_violations</span><span class="o">=</span><span class="n">check_violations</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Starting bulk minimization of </span><span class="si">%d</span><span class="s1"> structures on </span><span class="si">%d</span><span class="s1"> workers&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">))</span>
+
+        <span class="n">ar</span> <span class="o">=</span> <span class="n">lbv</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">pargs</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): map_async sent.&#39;</span><span class="p">)</span>
+
+        <span class="n">monitor_progress</span><span class="p">(</span><span class="s1">&#39;bulk_minimize() - </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">ar</span><span class="p">)</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Done&#39;</span><span class="p">)</span>
+
+        <span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ar</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>
+
+        <span class="n">ar</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">errors</span> <span class="o">=</span> <span class="p">[</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="n">completed</span> <span class="o">+=</span> <span class="p">[</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="n">completed</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">completed</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">errors</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Exception returned in minimizing structure </span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Saving partial results to </span><span class="si">%s</span><span class="s1">.incomplete.pickle&#39;</span><span class="p">)</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">pf</span><span class="p">:</span>
+                <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">((</span><span class="n">completed</span><span class="p">,</span> <span class="n">errors</span><span class="p">),</span> <span class="n">pf</span><span class="p">,</span> <span class="n">pickle</span><span class="o">.</span><span class="n">HIGHEST_PROTOCOL</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Unable to complete bulk_minimize()&#39;</span><span class="p">)</span>
+
+        <span class="c1"># We finished lammps runs here</span>
+        <span class="n">new_crd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">x</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">)</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">])</span>
+
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">)</span>
+
+        <span class="n">energies</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;final-energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">_</span><span class="p">)</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">])</span>
+        <span class="n">violated</span> <span class="o">=</span> <span class="p">[(</span><span class="n">i</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span><span class="p">)</span> <span class="ow">in</span> <span class="n">completed</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">)]</span>
+        <span class="n">n_violated</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">violated</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> structures with violations over </span><span class="si">%d</span><span class="s1"> structures&#39;</span><span class="p">,</span>
+                     <span class="n">n_violated</span><span class="p">,</span>
+                     <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">))</span>
+        
+        <span class="n">write_hss</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.hss&#39;</span><span class="p">,</span> <span class="n">new_crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">)</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">savetxt</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;_energies.dat&#39;</span><span class="p">,</span> <span class="n">energies</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">completed</span>
+    
+    <span class="k">except</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;bulk_minimization() failed&#39;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+    
+<div class="viewcode-block" id="serial_lammps_call"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.serial_lammps_call">[docs]</a><span class="k">def</span> <span class="nf">serial_lammps_call</span><span class="p">(</span><span class="n">largs</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Serial function to be mapped in parallel. </span>
+<span class="sd">    largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) </span>
+<span class="sd">    Reads parameters and coordinates from disk, perform minimization,</span>
+<span class="sd">    and return run information in a dictionary (see get_info_from_log).</span>
+<span class="sd">    In case of failure, gracefully returns None and the traceback.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># importing here so it will be called on the parallel workers</span>
+        <span class="kn">import</span> <span class="nn">json</span>
+        <span class="kn">import</span> <span class="nn">traceback</span>
+        <span class="kn">import</span> <span class="nn">os.path</span>
+        <span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">read_hms</span><span class="p">,</span> <span class="n">write_hms</span>
+        
+        <span class="c1"># unpack arguments</span>
+        <span class="n">fname</span><span class="p">,</span> <span class="n">param_fname</span><span class="p">,</span> <span class="n">new_fname</span> <span class="o">=</span> <span class="n">largs</span>
+        <span class="n">run_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">new_fname</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># read parameters from disk</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">param_fname</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">kwargs</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+
+        <span class="c1"># read coordinates from disk</span>
+        <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_bead</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">read_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">)</span>
+    
+        <span class="c1"># perform minimization</span>
+        <span class="n">new_crd</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span> <span class="o">=</span> <span class="n">lammps_minimize</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">run_name</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        
+        <span class="c1"># write coordinates to disk asyncronously and return run info</span>
+        <span class="n">ex</span> <span class="o">=</span> <span class="n">concurrent</span><span class="o">.</span><span class="n">futures</span><span class="o">.</span><span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">ex</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">write_hms</span><span class="p">,</span> <span class="n">new_fname</span><span class="p">,</span> <span class="n">new_crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">info</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">))</span>
+
+    <span class="k">except</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">sys</span>
+        <span class="n">etype</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">tb</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
+        <span class="n">infostr</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exception</span><span class="p">(</span><span class="n">etype</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">tb</span><span class="p">))</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">infostr</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span></div>
+
+    
+
+<div class="viewcode-block" id="bulk_minimize_single_file"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.bulk_minimize_single_file">[docs]</a><span class="k">def</span> <span class="nf">bulk_minimize_single_file</span><span class="p">(</span><span class="n">parallel_client</span><span class="p">,</span>
+                              <span class="n">old_prefix</span><span class="p">,</span>
+                              <span class="n">new_prefix</span><span class="p">,</span>
+                              <span class="n">n_struct</span><span class="p">,</span>
+                              <span class="n">workdir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span>
+                              <span class="n">tmp_files_dir</span><span class="o">=</span><span class="s1">&#39;/dev/shm&#39;</span><span class="p">,</span>
+                              <span class="n">log_dir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span>
+                              <span class="n">check_violations</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                              <span class="n">ignore_restart</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                              <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Uses ipyparallel to minimize n_struct structures.</span>
+<span class="sd">    parallel_client is an instance of ipyparallel.Client</span>
+<span class="sd">    The filenames are expected to be in the form</span>
+<span class="sd">    prefix_&lt;structure id&gt;.hms </span>
+<span class="sd">    Maps the minimization to the workers and return statistics</span>
+<span class="sd">    for the whole run. If one or more of the minimizations</span>
+<span class="sd">    fails, it will raise a RuntimeError.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="c1"># get the logger</span>
+    <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">json</span>
+
+        <span class="c1"># write all parameters to a file on filesystem</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;check_violations&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">check_violations</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;ignore_restart&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ignore_restart</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;tmp_files_dir&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tmp_files_dir</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s1">&#39;log_dir&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">log_dir</span>
+        <span class="n">parameter_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">workdir</span><span class="p">,</span> <span class="n">new_prefix</span> <span class="o">+</span> <span class="s1">&#39;.parms.json&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">parameter_fname</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="n">fp</span><span class="p">)</span>
+    
+        <span class="c1"># check if we already have some output files written.</span>
+        <span class="n">completed</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">to_minimize</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">ignore_restart</span><span class="p">:</span>
+            <span class="n">to_minimize</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">))</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): ignoring completed runs.&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">):</span>
+                <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">new_prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+                <span class="n">fpath</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">workdir</span><span class="p">,</span> <span class="n">fname</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">fpath</span><span class="p">):</span>
+                    <span class="n">completed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">to_minimize</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): minimization appears to be already finished.&#39;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[]</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Found </span><span class="si">%d</span><span class="s1"> already minimized structures. Minimizing </span><span class="si">%d</span><span class="s1"> remaining ones&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">))</span>
+
+        <span class="c1"># prepare arguments as a list of tuples (map wants a single argument for each call)</span>
+        <span class="n">pargs</span> <span class="o">=</span> <span class="p">[(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">workdir</span><span class="p">,</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">old_prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)),</span>
+                  <span class="n">parameter_fname</span><span class="p">,</span>
+                  <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">workdir</span><span class="p">,</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">new_prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)))</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">to_minimize</span><span class="p">]</span> 
+
+        <span class="c1"># using ipyparallel to map functions to workers</span>
+        <span class="n">engine_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">parallel_client</span><span class="o">.</span><span class="n">ids</span><span class="p">)</span>
+        <span class="n">lbv</span> <span class="o">=</span> <span class="n">parallel_client</span><span class="o">.</span><span class="n">load_balanced_view</span><span class="p">()</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Starting bulk minimization of </span><span class="si">%d</span><span class="s1"> structures on </span><span class="si">%d</span><span class="s1"> workers&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">))</span>
+        <span class="n">ar</span> <span class="o">=</span> <span class="n">lbv</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">serial_lammps_call</span><span class="p">,</span> <span class="n">pargs</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): map_async sent.&#39;</span><span class="p">)</span>
+
+        <span class="c1"># monitor progress</span>
+        <span class="n">monitor_progress</span><span class="p">(</span><span class="s1">&#39;bulk_minimize() - </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">new_prefix</span><span class="p">,</span> <span class="n">ar</span><span class="p">)</span>
+
+        <span class="c1"># post-analysis</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Done (Total time: </span><span class="si">%s</span><span class="s1">)&#39;</span> <span class="o">%</span> <span class="n">pretty_tdelta</span><span class="p">(</span><span class="n">ar</span><span class="o">.</span><span class="n">wall_time</span><span class="p">))</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">ar</span><span class="o">.</span><span class="n">get</span><span class="p">())</span>  <span class="c1"># returncode, info, n_violations  </span>
+
+        <span class="c1"># check for errors</span>
+        <span class="n">errors</span> <span class="o">=</span> <span class="p">[</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="n">now_completed</span> <span class="o">=</span> <span class="p">[</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">,</span> <span class="n">results</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">errors</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Exception returned in minimizing structure </span><span class="si">%d</span><span class="s1">: </span><span class="si">%s</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">()</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Unable to complete bulk_minimize()&#39;</span><span class="p">)</span>
+        
+        <span class="c1"># print a summary</span>
+        <span class="n">n_violated</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="mi">1</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">now_completed</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="p">])</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> structures with violations over </span><span class="si">%d</span><span class="s1"> structures&#39;</span><span class="p">,</span>
+                     <span class="n">n_violated</span><span class="p">,</span>
+                     <span class="nb">len</span><span class="p">(</span><span class="n">now_completed</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">now_completed</span><span class="p">),</span> <span class="n">n_violated</span>
+    
+    <span class="k">except</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;bulk_minimization() failed&#39;</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">raise</span></div>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

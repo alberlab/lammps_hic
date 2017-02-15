@@ -1,0 +1,325 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>lammps_hic.actdist &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for lammps_hic.actdist</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python</span>
+
+<span class="c1"># Copyright (C) 2015 University of Southern California and</span>
+<span class="c1">#                        Guido Polles</span>
+<span class="c1"># </span>
+<span class="c1"># Authors: Guido Polles, Nan Hua</span>
+<span class="c1"># </span>
+<span class="c1"># This program is free software: you can redistribute it and/or modify</span>
+<span class="c1"># it under the terms of the GNU General Public License as published by</span>
+<span class="c1"># the Free Software Foundation, either version 3 of the License, or</span>
+<span class="c1"># (at your option) any later version.</span>
+<span class="c1"># </span>
+<span class="c1"># This program is distributed in the hope that it will be useful,</span>
+<span class="c1"># but WITHOUT ANY WARRANTY; without even the implied warranty of</span>
+<span class="c1"># MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the</span>
+<span class="c1"># GNU General Public License for more details.</span>
+<span class="c1"># </span>
+<span class="c1"># You should have received a copy of the GNU General Public License</span>
+<span class="c1"># along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.</span>
+
+<span class="n">__author__</span>  <span class="o">=</span> <span class="s2">&quot;Guido Polles&quot;</span>
+
+<span class="n">__license__</span> <span class="o">=</span> <span class="s2">&quot;GPL&quot;</span>
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.1&quot;</span>
+<span class="n">__email__</span>   <span class="o">=</span> <span class="s2">&quot;polles@usc.edu&quot;</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">read_hss</span><span class="p">,</span> <span class="n">read_full_actdist</span>
+<span class="kn">from</span> <span class="nn">.util</span> <span class="k">import</span> <span class="n">monitor_progress</span>
+
+
+<span class="k">def</span> <span class="nf">_compute_actdist</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+    <span class="n">local_i</span><span class="p">,</span> <span class="n">local_j</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">to_process</span><span class="p">,</span> <span class="n">nstruct</span> <span class="o">=</span> <span class="n">data</span>
+
+    <span class="k">def</span> <span class="nf">existingPortion</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">rsum</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">v</span><span class="o">&lt;=</span><span class="n">rsum</span><span class="p">)</span><span class="o">*</span><span class="mf">1.0</span><span class="o">/</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">cleanProbability</span><span class="p">(</span><span class="n">pij</span><span class="p">,</span> <span class="n">pexist</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">pexist</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">pclean</span> <span class="o">=</span> <span class="p">(</span><span class="n">pij</span> <span class="o">-</span> <span class="n">pexist</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">pexist</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">pclean</span> <span class="o">=</span> <span class="n">pij</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pclean</span><span class="p">)</span>
+        
+
+    <span class="sd">&#39;&#39;&#39;The function to be returned&#39;&#39;&#39;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">pwish</span><span class="p">,</span> <span class="n">plast</span> <span class="ow">in</span> <span class="n">to_process</span><span class="p">:</span>
+        
+        <span class="n">x1</span> <span class="o">=</span> <span class="n">local_i</span><span class="p">[</span><span class="s1">&#39;x1&#39;</span><span class="p">][</span><span class="n">i</span><span class="o">-</span><span class="n">local_i</span><span class="p">[</span><span class="s1">&#39;offset1&#39;</span><span class="p">]]</span> 
+        <span class="n">x2</span> <span class="o">=</span> <span class="n">local_i</span><span class="p">[</span><span class="s1">&#39;x2&#39;</span><span class="p">][</span><span class="n">i</span><span class="o">-</span><span class="n">local_i</span><span class="p">[</span><span class="s1">&#39;offset2&#39;</span><span class="p">]]</span>
+        <span class="n">y1</span> <span class="o">=</span> <span class="n">local_j</span><span class="p">[</span><span class="s1">&#39;x1&#39;</span><span class="p">][</span><span class="n">j</span><span class="o">-</span><span class="n">local_j</span><span class="p">[</span><span class="s1">&#39;offset1&#39;</span><span class="p">]]</span> 
+        <span class="n">y2</span> <span class="o">=</span> <span class="n">local_j</span><span class="p">[</span><span class="s1">&#39;x2&#39;</span><span class="p">][</span><span class="n">j</span><span class="o">-</span><span class="n">local_j</span><span class="p">[</span><span class="s1">&#39;offset2&#39;</span><span class="p">]]</span>
+        
+        
+        <span class="n">ri</span><span class="p">,</span> <span class="n">rj</span> <span class="o">=</span> <span class="n">radii</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">radii</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+
+        <span class="n">d_sq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="n">nstruct</span><span class="p">)</span> <span class="p">)</span>
+        <span class="n">d_sq</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">x1</span> <span class="o">-</span> <span class="n">y1</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">d_sq</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">x2</span> <span class="o">-</span> <span class="n">y2</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">d_sq</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">x1</span> <span class="o">-</span> <span class="n">y2</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">d_sq</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="n">x2</span> <span class="o">-</span> <span class="n">y1</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">sel_dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">nstruct</span> <span class="o">*</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">pnow</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">rcutsq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">square</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">ri</span> <span class="o">+</span> <span class="n">rj</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nstruct</span><span class="p">):</span>
+            <span class="n">z</span> <span class="o">=</span> <span class="n">d_sq</span><span class="p">[:,</span> <span class="n">n</span><span class="p">]</span>
+
+            <span class="c1"># assume the closest pair as the first (eventual) contact  </span>
+            <span class="c1"># and keep the distance of the only other pair which is compatible with it.</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">z</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">m</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">m</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">sel_dist</span><span class="p">[</span><span class="mi">2</span><span class="o">*</span><span class="n">n</span><span class="p">:</span><span class="mi">2</span><span class="o">*</span><span class="n">n</span><span class="o">+</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">2</span><span class="p">]</span>
+                <span class="n">pnow</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span> <span class="n">z</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">rcutsq</span> <span class="p">)</span>    
+            <span class="k">else</span><span class="p">:</span>                   
+                <span class="n">sel_dist</span><span class="p">[</span><span class="mi">2</span><span class="o">*</span><span class="n">n</span><span class="p">:</span><span class="mi">2</span><span class="o">*</span><span class="n">n</span><span class="o">+</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">4</span><span class="p">]</span>
+                <span class="n">pnow</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span> <span class="n">z</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">4</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">rcutsq</span> <span class="p">)</span>    
+
+        <span class="n">pnow</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">pnow</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">nstruct</span><span class="p">)</span>
+        <span class="n">sortdist_sq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">sel_dist</span><span class="p">)</span>
+
+        <span class="n">t</span> <span class="o">=</span> <span class="n">cleanProbability</span><span class="p">(</span><span class="n">pnow</span><span class="p">,</span> <span class="n">plast</span><span class="p">)</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">cleanProbability</span><span class="p">(</span><span class="n">pwish</span><span class="p">,</span><span class="n">t</span><span class="p">)</span>
+
+        <span class="n">res</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">p</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">:</span>
+            <span class="n">o</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">nstruct</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">p</span> <span class="o">*</span> <span class="n">nstruct</span><span class="p">)))</span>
+            <span class="n">activation_distance</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">sortdist_sq</span><span class="p">[</span><span class="n">o</span><span class="p">])</span> <span class="o">-</span> <span class="p">(</span><span class="n">ri</span> <span class="o">+</span> <span class="n">rj</span><span class="p">)</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">pwish</span><span class="p">,</span> <span class="n">activation_distance</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">pnow</span><span class="p">)</span>
+            <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">results</span>
+
+
+<div class="viewcode-block" id="get_actdists"><a class="viewcode-back" href="../../actdist.html#lammps_hic.actdist.get_actdists">[docs]</a><span class="k">def</span> <span class="nf">get_actdists</span><span class="p">(</span><span class="n">parallel_client</span><span class="p">,</span> <span class="n">crd_fname</span><span class="p">,</span> <span class="n">probability_matrix</span><span class="p">,</span> <span class="n">theta</span><span class="p">,</span> <span class="n">last_ad</span><span class="p">,</span> <span class="n">save_to</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scatter</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Compute activation distances using ipyparallel. </span>
+
+<span class="sd">    :Input parameters:</span>
+<span class="sd">    </span>
+<span class="sd">        *parallel_client* </span>
+<span class="sd">            an ipyparallel Client istance to send jobs</span>
+<span class="sd">        </span>
+<span class="sd">        *crd_fname*</span>
+<span class="sd">            an hss filename of the coordinates</span>
+<span class="sd">        </span>
+<span class="sd">        *probability_matrix*</span>
+<span class="sd">            the contact probability matrix</span>
+<span class="sd">        </span>
+<span class="sd">        *theta* </span>
+<span class="sd">            work only on contacts with probability greater or equal to theta</span>
+<span class="sd">        </span>
+<span class="sd">        *last_ad*</span>
+<span class="sd">            the last activation distances. Either the filename or an iterable</span>
+<span class="sd">            with the activation distances of the last step, or None.</span>
+<span class="sd">        </span>
+<span class="sd">        *save_to*</span>
+<span class="sd">            file where to save the newly computed activation distances</span>
+<span class="sd">        </span>
+<span class="sd">        *scatter* </span>
+<span class="sd">            level of block subdivisions of the matrix. This function</span>
+<span class="sd">            divide the needed computations into blocks before sending the request</span>
+<span class="sd">            to parallel workers. It is a compromise between (i) sending coordinates for</span>
+<span class="sd">            every i, j pair computation and (ii) sending all the coordinates to the workers. </span>
+<span class="sd">            Option (i) would require a lot of communication, while option</span>
+<span class="sd">            (ii) would require a lot of memory on workers.</span>
+<span class="sd">            Hence, i&#39;s and j&#39;s are subdivided into blocks and sent to the workers, toghether</span>
+<span class="sd">            with the needed coordinates. Note that usually blocks on the diagonal </span>
+<span class="sd">            have a ton more contacts, hence for load balancing purposes the total number of blocks</span>
+<span class="sd">            should be larger than the number of workers. scatter=1 means that the </span>
+<span class="sd">            number of blocks is just big enough to have all workers receiving at</span>
+<span class="sd">            least 1 job. Hence, blocks are big and the load is not really balanced.</span>
+<span class="sd">            Higher values of scatter correspond to smaller blocks and better balancing</span>
+<span class="sd">            at the cost of increased communication. Note that scatter increase</span>
+<span class="sd">            the *linear* number of blocks, so scatter=10 means that the total</span>
+<span class="sd">            number of blocks is ~100 times the number of workers.</span>
+
+<span class="sd">    :Returns:</span>
+<span class="sd">    </span>
+<span class="sd">        *new_ad* </span>
+<span class="sd">            a numpy recarray with the newly computed activation distances</span>
+
+<span class="sd">    :Exceptions:</span>
+<span class="sd">    </span>
+<span class="sd">        * If the parallel client has no registered workers, it raises </span>
+<span class="sd">          a RuntimeError.</span>
+<span class="sd">        </span>
+<span class="sd">        * Does not catch any error coming from wrong parameters or </span>
+<span class="sd">          input</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
+    
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Starting contact activation distance job on </span><span class="si">%s</span><span class="s1">, p = </span><span class="si">%.3f</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">crd_fname</span><span class="p">,</span> <span class="n">theta</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">last_ad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">last_ad</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">last_ad</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">last_ad</span><span class="p">,</span> <span class="n">unicode</span><span class="p">):</span>
+        <span class="n">last_ad</span> <span class="o">=</span> <span class="n">read_full_actdist</span><span class="p">(</span><span class="n">last_ad</span><span class="p">)</span>   
+
+    <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">n_bead</span> <span class="o">=</span> <span class="n">read_hss</span><span class="p">(</span><span class="n">crd_fname</span><span class="p">)</span>    
+    <span class="n">n_loci</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">probability_matrix</span><span class="p">)</span>
+    <span class="n">last_prob</span> <span class="o">=</span> <span class="p">{(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span> <span class="n">p</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">pw</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">pn</span> <span class="ow">in</span> <span class="n">last_ad</span><span class="p">}</span>
+    <span class="n">n_workers</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">parallel_client</span><span class="o">.</span><span class="n">ids</span><span class="p">)</span>
+                
+    <span class="k">if</span> <span class="n">n_workers</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;get_actdists(): No Engines Registered&#39;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;get_actdists(): No Engines Registered&#39;</span><span class="p">)</span>
+    
+    <span class="c1"># heuristic to have reasonably small communication but</span>
+    <span class="c1"># using all the workers. We subdivide in blocks the i, j</span>
+    <span class="c1"># matrix, such that the blocks are ~10 times the number of </span>
+    <span class="c1"># workers. This allows for some balancing but not resulting</span>
+    <span class="c1"># in eccessive communication.</span>
+    <span class="n">blocks_per_line</span> <span class="o">=</span> <span class="n">scatter</span> <span class="o">*</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">0.25</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">n_workers</span><span class="p">)</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">blocks_per_line</span> <span class="o">&gt;</span> <span class="n">n_loci</span><span class="p">:</span>
+        <span class="n">blocks_per_line</span> <span class="o">=</span> <span class="n">n_loci</span>
+    <span class="n">block_size</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_loci</span> <span class="o">//</span> <span class="n">blocks_per_line</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">blocks</span> <span class="o">=</span> <span class="p">{(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span> <span class="nb">list</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">blocks_per_line</span><span class="p">)</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">blocks_per_line</span><span class="p">)}</span>
+    
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_loci</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">,</span> <span class="n">n_loci</span><span class="p">):</span> <span class="c1"># skips consecutive beads</span>
+            <span class="k">if</span> <span class="n">probability_matrix</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">theta</span><span class="p">:</span>
+                <span class="n">lp</span> <span class="o">=</span> <span class="n">last_prob</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">blocks</span><span class="p">[(</span><span class="n">i</span> <span class="o">//</span> <span class="n">block_size</span><span class="p">,</span> <span class="n">j</span> <span class="o">//</span> <span class="n">block_size</span><span class="p">)]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">probability_matrix</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">],</span> <span class="n">lp</span><span class="p">))</span>
+        
+    <span class="n">local_data</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">blocks_per_line</span><span class="p">):</span>
+        <span class="n">offset1</span> <span class="o">=</span> <span class="n">k</span> <span class="o">*</span> <span class="n">block_size</span>
+        <span class="n">offset2</span> <span class="o">=</span> <span class="n">k</span> <span class="o">*</span> <span class="n">block_size</span>
+        <span class="n">x1</span> <span class="o">=</span> <span class="n">crd</span><span class="p">[:,</span> <span class="n">k</span> <span class="o">*</span> <span class="n">block_size</span><span class="p">:</span><span class="nb">min</span><span class="p">((</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">block_size</span><span class="p">,</span> <span class="n">n_loci</span><span class="p">),</span> <span class="p">:]</span><span class="o">.</span><span class="n">transpose</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="n">x2</span> <span class="o">=</span> <span class="n">crd</span><span class="p">[:,</span> <span class="n">k</span> <span class="o">*</span> <span class="n">block_size</span> <span class="o">+</span> <span class="n">n_loci</span><span class="p">:</span><span class="nb">min</span><span class="p">((</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">block_size</span> <span class="o">+</span> <span class="n">n_loci</span><span class="p">,</span> <span class="mi">2</span><span class="o">*</span><span class="n">n_loci</span><span class="p">),</span> <span class="p">:]</span><span class="o">.</span><span class="n">transpose</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="n">local_data</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s1">&#39;offset1&#39;</span> <span class="p">:</span> <span class="n">offset1</span><span class="p">,</span> <span class="s1">&#39;offset2&#39;</span><span class="p">:</span> <span class="n">offset2</span><span class="p">,</span> <span class="s1">&#39;x1&#39;</span><span class="p">:</span> <span class="n">x1</span><span class="p">,</span> <span class="s1">&#39;x2&#39;</span><span class="p">:</span> <span class="n">x2</span><span class="p">})</span>
+    
+    <span class="n">args</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">bi</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">blocks_per_line</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">bj</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">bi</span><span class="p">,</span> <span class="n">blocks_per_line</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">blocks</span><span class="p">[(</span><span class="n">bi</span><span class="p">,</span> <span class="n">bj</span><span class="p">)])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">local_data</span><span class="p">[</span><span class="n">bi</span><span class="p">],</span> <span class="n">local_data</span><span class="p">[</span><span class="n">bj</span><span class="p">],</span> <span class="n">radii</span><span class="p">,</span> <span class="n">blocks</span><span class="p">[(</span><span class="n">bi</span><span class="p">,</span> <span class="n">bj</span><span class="p">)],</span> <span class="n">n_struct</span><span class="p">])</span>
+    
+    <span class="n">engine_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">parallel_client</span><span class="o">.</span><span class="n">ids</span><span class="p">)</span>
+    <span class="n">dview</span> <span class="o">=</span> <span class="n">parallel_client</span><span class="p">[:]</span>
+    <span class="n">dview</span><span class="o">.</span><span class="n">use_cloudpickle</span><span class="p">()</span>
+    <span class="n">lbview</span> <span class="o">=</span> <span class="n">parallel_client</span><span class="o">.</span><span class="n">load_balanced_view</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">)</span>
+
+    <span class="n">async_results</span> <span class="o">=</span> <span class="n">lbview</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">_compute_actdist</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+    
+    <span class="n">monitor_progress</span><span class="p">(</span><span class="s1">&#39;get_actdists()&#39;</span><span class="p">,</span> <span class="n">async_results</span><span class="p">)</span>
+        
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">async_results</span><span class="o">.</span><span class="n">get</span><span class="p">():</span>
+        <span class="n">results</span> <span class="o">+=</span> <span class="n">r</span>
+        
+    <span class="k">if</span> <span class="n">save_to</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">savetxt</span><span class="p">(</span><span class="n">save_to</span><span class="p">,</span>
+                   <span class="n">results</span><span class="p">,</span>
+                   <span class="n">fmt</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">%6d</span><span class="s1"> </span><span class="si">%6d</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1"> </span><span class="si">%10.2f</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1">&#39;</span><span class="p">)</span>  <span class="c1">#myio.ACTDIST_TXT_FMT)</span>
+
+    <span class="n">columns</span> <span class="o">=</span><span class="p">[(</span><span class="s1">&#39;i&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;j&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pwish&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;actdist&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pclean&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pnow&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">)]</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Done with contact activation distance job on </span><span class="si">%s</span><span class="s1">, p = </span><span class="si">%.3f</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">crd_fname</span><span class="p">,</span> <span class="n">theta</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">columns</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">recarray</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

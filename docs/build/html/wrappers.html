@@ -1,0 +1,189 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>High Level Wrapper Classes &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="high-level-wrapper-classes">
+<h1>High Level Wrapper Classes<a class="headerlink" href="#high-level-wrapper-classes" title="Permalink to this headline">¶</a></h1>
+<dl class="class">
+<dt id="lammps_hic.wrappers.ModelingStep">
+<em class="property">class </em><code class="descclassname">lammps_hic.wrappers.</code><code class="descname">ModelingStep</code><span class="sig-paren">(</span><em>from_label</em>, <em>to_label</em>, <em>n_conf</em>, <em>workdir='tmp'</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/wrappers.html#ModelingStep"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.wrappers.ModelingStep" title="Permalink to this definition">¶</a></dt>
+<dd><table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name" colspan="2">Constructor Arguments:</th></tr>
+<tr class="field-odd field"><td>&nbsp;</td><td class="field-body"><dl class="first last docutils">
+<dt><em>from_label (string)</em></dt>
+<dd><p class="first last">last iteration label</p>
+</dd>
+<dt><em>to_label (string)</em></dt>
+<dd><p class="first last">label for the iteration to be performed</p>
+</dd>
+<dt><em>n_conf (int)</em></dt>
+<dd><p class="first last">number of total structures in the population</p>
+</dd>
+<dt><em>workdir (string)</em></dt>
+<dd><p class="first last">directory containing the <em>hms</em> structure files. New files
+will be also written here.</p>
+</dd>
+<dt><em>**kwargs</em></dt>
+<dd><p class="first last">additional arguments to be passed to the
+<strong>lammps_hic.lammps.bulk_minimize_single_file</strong> function. 
+See lammps_hic.lammps documentation for details</p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Wrapper around multiprocessing and the lammps_hic.lammps module.
+Calling its member <strong>run</strong> function spawns a separate process,
+which will be responsible to connect to the ipyparallel controller
+and perform the parallel minimization of the structures.</p>
+<p>A modeling step requires <em>n_conf</em> files in the <em>workdir</em> directory,
+containing the starting coordinates. 
+The starting file names are expected to be in the 
+<em>from_label*_*n</em>.hms format, where <em>n</em> goes from 0 to <em>n_conf</em> - 1.</p>
+<p>It also requires writable <strong>logs</strong>, <strong>structures</strong>, <strong>info</strong> and
+<strong>violations</strong> directories.</p>
+<p>The <strong>run</strong> function is syncronous and waits for the whole
+minimization to complete. A log file logs/<em>to_label</em>.log
+is updated every ~60 seconds during minimization.</p>
+<p>If the minimization is successful, <em>failed</em> is set to False
+and <em>n_violated</em> is set to the number of structures with
+significant violations.</p>
+<p>A successful minimization will generate the following files:</p>
+<ul class="simple">
+<li>structures/&lt;to_label&gt;.hss</li>
+<li>violations/&lt;to_label&gt;.violations</li>
+<li>info/&lt;to_label&gt;.info</li>
+<li>logs/<em>&lt;to_label&gt;</em>.log</li>
+<li>&lt;n_conf&gt; files, named &lt;workdir&gt;/&lt;to_label&gt;_&lt;n&gt;.hms, 
+with 0 &lt;= n &lt; <em>n_conf</em></li>
+</ul>
+<p>Note that the hms files are redundant, as all the information
+is packed in the other files after the run. <strong>They are however still 
+needed as starting configurations in the next minimization step</strong>.</p>
+<p>A failed minimization will set the <em>failed</em> member to True, and 
+store the formatted traceback string in the <em>error</em> member variable.</p>
+<dl class="attribute">
+<dt id="lammps_hic.wrappers.ModelingStep.error">
+<code class="descname">error</code><em class="property"> = None</em><a class="headerlink" href="#lammps_hic.wrappers.ModelingStep.error" title="Permalink to this definition">¶</a></dt>
+<dd><p>If the run fails, error is set to the formatted backtrace</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="lammps_hic.wrappers.ModelingStep.failed">
+<code class="descname">failed</code><em class="property"> = None</em><a class="headerlink" href="#lammps_hic.wrappers.ModelingStep.failed" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set to True/False at the end of the run.</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="lammps_hic.wrappers.ModelingStep.n_violated">
+<code class="descname">n_violated</code><em class="property"> = None</em><a class="headerlink" href="#lammps_hic.wrappers.ModelingStep.n_violated" title="Permalink to this definition">¶</a></dt>
+<dd><p>On a successful run, is set to the number of structures
+with violated restraints. Details of violations can be found
+in the <em>violations/&lt;to_label&gt;.violations</em> file</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.wrappers.ModelingStep.run">
+<code class="descname">run</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/wrappers.html#ModelingStep.run"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.wrappers.ModelingStep.run" title="Permalink to this definition">¶</a></dt>
+<dd><p>Starts the minimization process and wait for it to complete.
+Sets the <strong>failed</strong> befor returning.</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/wrappers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

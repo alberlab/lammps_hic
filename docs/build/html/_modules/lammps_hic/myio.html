@@ -1,0 +1,288 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>lammps_hic.myio &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for lammps_hic.myio</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
+
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">h5py</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">os.path</span>
+
+
+<span class="n">ACTDIST_TXT_FMT</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%6d</span><span class="s1"> </span><span class="si">%6d</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1"> </span><span class="si">%10.2f</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1"> </span><span class="si">%.5f</span><span class="s1">&#39;</span>
+<span class="n">violations_dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">([(</span><span class="s1">&#39;i&#39;</span><span class="p">,</span> <span class="s1">&#39;i4&#39;</span><span class="p">),</span>
+                             <span class="p">(</span><span class="s1">&#39;j&#39;</span><span class="p">,</span> <span class="s1">&#39;i4&#39;</span><span class="p">),</span>
+                             <span class="p">(</span><span class="s1">&#39;absv&#39;</span><span class="p">,</span> <span class="s1">&#39;f4&#39;</span><span class="p">),</span>
+                             <span class="p">(</span><span class="s1">&#39;relv&#39;</span><span class="p">,</span> <span class="s1">&#39;f4&#39;</span><span class="p">),</span>
+                             <span class="p">(</span><span class="s1">&#39;bt&#39;</span><span class="p">,</span> <span class="s1">&#39;S64&#39;</span><span class="p">)])</span>
+
+
+<span class="k">def</span> <span class="nf">read_full_actdist</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+    <span class="n">columns</span> <span class="o">=</span><span class="p">[(</span><span class="s1">&#39;i&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;j&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pwish&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;actdist&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pclean&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;pnow&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">genfromtxt</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">columns</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">ad</span> <span class="o">=</span> <span class="p">[</span><span class="n">ad</span><span class="p">]</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">recarray</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="n">ad</span>
+
+
+<span class="k">def</span> <span class="nf">read_actdist</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+    <span class="n">columns</span> <span class="o">=</span><span class="p">[(</span><span class="s1">&#39;i&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;j&#39;</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span>
+              <span class="p">(</span><span class="s1">&#39;actdist&#39;</span><span class="p">,</span> <span class="nb">float</span><span class="p">),</span>
+             <span class="p">]</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">genfromtxt</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">columns</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">ad</span> <span class="o">=</span> <span class="p">[</span><span class="n">ad</span><span class="p">]</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">recarray</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">ad</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="n">ad</span>
+
+
+<span class="k">def</span> <span class="nf">write_actdist</span><span class="p">():</span>
+    <span class="k">pass</span>
+
+
+<span class="k">def</span> <span class="nf">read_hss</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">i</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">crd</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][()]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">crd</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:][()]</span>
+        <span class="n">radii</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;radius&#39;</span><span class="p">][()]</span>
+        <span class="n">chrom</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;idx&#39;</span><span class="p">][()]</span>
+        <span class="n">n_struct</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;nstruct&#39;</span><span class="p">][()]</span>
+        <span class="n">n_bead</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;nbead&#39;</span><span class="p">][()]</span>
+    <span class="k">return</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">n_bead</span>
+
+
+<span class="k">def</span> <span class="nf">write_hss</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">radii</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;write_hss(): len(radii) != crd.shape[1]&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">chrom</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">radii</span><span class="p">):</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;write_hss(): len(chrom) != len(radii)&#39;</span><span class="p">)</span>
+    
+    <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span> 
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;coordinates&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">crd</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;radius&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">radii</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;idx&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">chrom</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;nstruct&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;i4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;nbead&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;i4&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">read_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">):</span>
+
+    <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">crd</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][()]</span>
+        <span class="n">radii</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;radius&#39;</span><span class="p">][()]</span>
+        <span class="n">chrom</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;idx&#39;</span><span class="p">][()]</span>
+        <span class="n">n_bead</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;nbead&#39;</span><span class="p">][()]</span>
+        <span class="n">violations</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;violations&#39;</span><span class="p">][()]</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;info&#39;</span><span class="p">][()])</span>
+    <span class="k">return</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_bead</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">info</span>
+
+
+<span class="k">def</span> <span class="nf">write_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">violations</span><span class="o">=</span><span class="p">[],</span> <span class="n">info</span><span class="o">=</span><span class="p">{}):</span>
+    
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">radii</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">):</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;write_hms(): len(radii) != crd.shape[0]&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">chrom</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">):</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;write_hms(): len(chrom) != crd.shape[0]&#39;</span><span class="p">)</span>
+    
+    <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span> 
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;coordinates&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">crd</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;radius&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">radii</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;idx&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">chrom</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;nbead&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">crd</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;i4&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;violations&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">violations</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">violations_dtype</span><span class="p">))</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;info&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">info</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="remove_hms"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.remove_hms">[docs]</a><span class="k">def</span> <span class="nf">remove_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Removes hms files.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">):</span>
+        <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">fname</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">fname</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">pack_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">hss</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">violations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">remove_after</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_beads</span><span class="p">,</span> <span class="n">cviol</span><span class="p">,</span> <span class="n">cinfo</span> <span class="o">=</span> <span class="n">read_hms</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+        
+        <span class="k">def</span> <span class="nf">_vprint</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;STRUCTURE:&#39;</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">violations</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;bt&#39;</span><span class="p">],</span> <span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;j&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;absv&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;relv&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">_iprint</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">structure_index</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+
+        <span class="c1"># opens files</span>
+        <span class="k">if</span> <span class="n">hss</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">hss_file</span> <span class="o">=</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">hss</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;coordinates&#39;</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">n_struct</span><span class="p">,</span> <span class="n">n_beads</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;radius&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">radii</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;f4&#39;</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;idx&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">chrom</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;nstruct&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">n_struct</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;i4&#39;</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">create_dataset</span><span class="p">(</span><span class="s1">&#39;nbead&#39;</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">n_beads</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;i4&#39;</span><span class="p">)</span>
+            <span class="n">hss_file</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">crd</span>
+
+        <span class="k">if</span> <span class="n">violations</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">violations_file</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">violations</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span>
+            <span class="n">_vprint</span><span class="p">(</span><span class="n">violations_file</span><span class="p">,</span> <span class="n">cviol</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">info</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">info_file</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">info</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span>
+
+            <span class="c1"># print headers</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;# structure&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">info_file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">cinfo</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">info_file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">info_file</span><span class="p">)</span>
+
+            <span class="c1"># print first record</span>
+            <span class="n">_iprint</span><span class="p">(</span><span class="n">info_file</span><span class="p">,</span> <span class="n">cinfo</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">):</span>
+            <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+        
+            <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">hss</span><span class="p">:</span>
+                    <span class="n">hss_file</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][()]</span>
+
+                <span class="k">if</span> <span class="n">violations</span><span class="p">:</span>
+                    <span class="n">_vprint</span><span class="p">(</span><span class="n">violations_file</span><span class="p">,</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;violations&#39;</span><span class="p">][()],</span> <span class="n">i</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">info</span><span class="p">:</span>
+                    <span class="n">_iprint</span><span class="p">(</span><span class="n">info_file</span><span class="p">,</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;info&#39;</span><span class="p">][()]),</span> <span class="n">i</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">hss</span><span class="p">:</span>
+            <span class="n">hss_file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">violations</span><span class="p">:</span>
+            <span class="n">violations_file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">info</span><span class="p">:</span>
+            <span class="n">info_file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">remove_after</span><span class="p">:</span>
+            <span class="n">remove_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">)</span>
+
+    <span class="k">except</span><span class="p">:</span> <span class="c1"># let&#39;s make sure the hdf5 file is removed, else weird stuff happens</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">hss</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">hss</span><span class="p">)</span>
+        <span class="k">raise</span>
+    
+
+
+
+
+
+
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">LammpsHiC 0.1 documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>
