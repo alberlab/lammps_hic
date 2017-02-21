@@ -121,6 +121,7 @@ def remove_hms(prefix, n_struct):
 
 def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_after=False):
     try:
+        n_violated = 0
         crd, radii, chrom, n_beads, cviol, cinfo = read_hms('{}_{}.hms'.format(prefix, 0))
         
         def _vprint(file, violations, structure_index):
@@ -146,6 +147,8 @@ def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_afte
             hss_file['coordinates'][0] = crd
 
         if violations is not None:
+            if len(violations) > 0:
+                n_violated += 1
             violations_file = open(violations, 'w')
             _vprint(violations_file, cviol, 0)
 
@@ -183,6 +186,8 @@ def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_afte
 
         if remove_after:
             remove_hms(prefix, n_struct)
+
+        return n_violated
 
     except: # let's make sure the hdf5 file is removed, else weird stuff happens
         if os.path.isfile(hss):

@@ -26,9 +26,13 @@ __email__   = "polles@usc.edu"
 
 import logging
 import numpy as np
+import scipy.sparse 
+import scipy.io
+from itertools import izip
+import time
 
 from .myio import read_hss, read_full_actdist
-from .util import monitor_progress
+from .util import monitor_progress, pretty_tdelta
 
 
 def _compute_actdist(data):
@@ -154,20 +158,33 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
           input
     '''
 
+    # setup logger
     logger = logging.getLogger()
-    
-    logger.info('Starting contact activation distance job on %s, p = %.3f', crd_fname, theta)
+    logger.info('Starting contact activation distance job on %s, p = %.3f, %d workers', crd_fname, theta, len(parallel_client))
 
+    # transform any matrix argiment in a scipy coo sparse matrix
+    start = time.time() 
+    if isinstance(probability_matrix, str) or isinstance(probability_matrix, unicode):
+        probability_matrix = scipy.io.mmread(probability_matrix)
+    elif isinstance(probability_matrix, np.ndarray):
+        probability_matrix = scipy.sparse.coo_matrix(np.triu(probability_matrix, 2))
+    end = time.time()
+    logger.debug('get_actdist(): timing for matrix io: %f', end-start)
+
+    # read the last activation distances and create a dictionary
     if last_ad is None:
         last_ad = []
     elif isinstance(last_ad, str) or isinstance(last_ad, unicode):
         last_ad = read_full_actdist(last_ad)   
-
+    start = time.time() 
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
-    n_loci = len(probability_matrix)
+    n_loci = probability_matrix.shape[0]
     last_prob = {(i, j): p for i, j, pw, d, p, pn in last_ad}
     n_workers = len(parallel_client.ids)
-                
+    end = time.time()
+    logger.debug('get_actdist(): timing for dictionary creation: %f', end-start)
+
+    # check we have workers
     if n_workers == 0:
         logger.error('get_actdists(): No Engines Registered')
         raise RuntimeError('get_actdists(): No Engines Registered')
@@ -177,18 +194,22 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     # matrix, such that the blocks are ~10 times the number of 
     # workers. This allows for some balancing but not resulting
     # in eccessive communication.
+    start = time.time() 
     blocks_per_line = scatter * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
     if blocks_per_line > n_loci:
         blocks_per_line = n_loci
     block_size = (n_loci // blocks_per_line) + 1
     blocks = {(i, j): list() for i in range(blocks_per_line) for j in range(i, blocks_per_line)}
     
-    for i in range(n_loci):
-        for j in range(i + 2, n_loci): # skips consecutive beads
-            if probability_matrix[i, j] >= theta:
-                lp = last_prob.get((i, j), 0)
-                blocks[(i // block_size, j // block_size)].append((i, j, probability_matrix[i, j], lp))
+    for i, j, v in izip(probability_matrix.row, probability_matrix.col, probability_matrix.data):
+        if v >= theta:
+            if i > j:
+                i, j = j, i
+            lp = last_prob.get((i, j), 0)
+            blocks[(i // block_size, j // block_size)].append((i, j, v, lp))
+
         
+    # select the data chunks to be sent to the workers
     local_data = []
     for k in range(blocks_per_line):
         offset1 = k * block_size
@@ -197,21 +218,25 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
         x2 = crd[:, k * block_size + n_loci:min((k + 1) * block_size + n_loci, 2*n_loci), :].transpose((1, 0, 2))
         local_data.append({'offset1' : offset1, 'offset2': offset2, 'x1': x1, 'x2': x2})
     
+    # prepare the arguments. We send a block only if there's work to do
     args = []
     for bi in range(blocks_per_line):
         for bj in range(bi, blocks_per_line):
             if len(blocks[(bi, bj)]) > 0:
                 args.append([local_data[bi], local_data[bj], radii, blocks[(bi, bj)], n_struct])
+                logger.debug('get_actdist(): block: %d %d n: %d', bi, bj, len(blocks[(bi, bj)]))
+    end = time.time()
+    logger.debug('get_actdist(): timing for data distribution: %f', end-start)
     
+    # actually send the jobs
     engine_ids = list(parallel_client.ids)
     dview = parallel_client[:]
     dview.use_cloudpickle()
     lbview = parallel_client.load_balanced_view(engine_ids)
-
     async_results = lbview.map_async(_compute_actdist, args)
-    
     monitor_progress('get_actdists()', async_results)
         
+    # merge results
     results = []
     for r in async_results.get():
         results += r
@@ -228,7 +253,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
               ('pclean', float),
               ('pnow', float)]
 
-    logger.info('Done with contact activation distance job on %s, p = %.3f', crd_fname, theta)
+    logger.info('Done with contact activation distance job on %s, p = %.3f (walltime: %s)', crd_fname, theta, pretty_tdelta(async_results.wall_time))
     
     return np.array(results, dtype=columns).view(np.recarray)
 

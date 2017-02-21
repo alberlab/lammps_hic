@@ -619,12 +619,14 @@ def _check_violations(bond_list, crd):
             if d > bt.r0:
                 absv = d - bt.r0
                 relv = (d - bt.r0) / bt.r0
-                violations.append((bond.i, bond.j, absv, relv, str(bt)))
+                if absv > float_epsilon:
+                    violations.append((bond.i, bond.j, absv, relv, str(bt)))
         if bt.type_str == 'harmonic_lower_bound':
             if d < bt.r0:
                 absv = bt.r0 - d
                 relv = (bt.r0 - d) / bt.r0
-                violations.append((bond.i, bond.j, absv, relv, str(bt)))
+                if absv > float_epsilon:
+                    violations.append((bond.i, bond.j, absv, relv, str(bt)))
     return violations
 
 
@@ -978,7 +980,7 @@ def bulk_minimize_single_file(parallel_client,
                     to_minimize.append(i)
             if len(to_minimize) == 0:
                 logger.info('bulk_minimize(): minimization appears to be already finished.')
-                return []
+                return (0, 0)
             logger.info('bulk_minimize(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
 
         # prepare arguments as a list of tuples (map wants a single argument for each call)

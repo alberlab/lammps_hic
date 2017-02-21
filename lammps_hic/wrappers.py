@@ -1,6 +1,19 @@
 import multiprocessing
 import logging
+import threading
 from .myio import pack_hms
+from .globals import log_fmt
+import logging.handlers
+
+
+def _logger_thread(q):
+    while True:
+        record = q.get()
+        if record is None:
+            break
+        logger = logging.getLogger(record.name)
+        logger.handle(record)
+
 
 class ModelingStepProcess(multiprocessing.Process):
     def __init__(self, queue, **kwargs):
@@ -30,11 +43,11 @@ class ModelingStepProcess(multiprocessing.Process):
                                                                 workdir=self.workdir, 
                                                                 **self.kwargs)
             
-            pack_hms('{}/{}'.format(self.workdir, self.to_label),
-                     self.n_conf,
-                     'structures/%s.hss' % self.to_label,
-                     'violations/%s.violations' % self.to_label,
-                     'info/%s.info' % self.to_label)
+            n_violated = pack_hms('{}/{}'.format(self.workdir, self.to_label),
+                                 self.n_conf,
+                                 'structures/%s.hss' % self.to_label,
+                                 'violations/%s.violations' % self.to_label,
+                                 'info/%s.info' % self.to_label)
 
             self.queue.put((0, n_completed, n_violated))
 
@@ -138,10 +151,9 @@ class ModelingStep(object):
         '''
         logger = logging.getLogger()
         logger.setLevel(logging.DEBUG)
-        FORMAT = "%(asctime)-15s:%(levelname)s:%(message)s"
         fh = logging.FileHandler(self.logfile)
         fh.setLevel(logging.DEBUG)
-        fh.setFormatter(logging.Formatter(FORMAT))
+        fh.setFormatter(logging.Formatter(log_fmt))
         logger.addHandler(fh)
         logger.info('Starting Modeling Step')
         self.proc.start()
@@ -164,7 +176,7 @@ class ModelingStep(object):
 class ActivationDistancesProcess(multiprocessing.Process):
 
     def __init__(self, queue, **kwargs):
-        super(ModelingStepProcess, self).__init__()
+        super(ActivationDistancesProcess, self).__init__()
         self.queue = queue
         self.from_label = kwargs.pop('from_label')
         self.to_label = kwargs.pop('to_label')
@@ -269,10 +281,9 @@ class ActivationDistancesStep(object):
     def run(self):
         logger = logging.getLogger()
         logger.setLevel(logging.DEBUG)
-        FORMAT = "%(asctime)-15s:%(levelname)s:%(message)s"
         fh = logging.FileHandler(self.logfile)
         fh.setLevel(logging.DEBUG)
-        fh.setFormatter(logging.Formatter(FORMAT))
+        fh.setFormatter(logging.Formatter(log_fmt))
         logger.addHandler(fh)
         logger.info('Starting Activation Distances step')
         self.proc.start()
