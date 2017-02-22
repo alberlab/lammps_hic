@@ -1,3 +1,34 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2016 University of Southern California and
+#                        Guido Polles
+# 
+# Authors: Guido Polles
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+'''
+The **lammps** module provides function to interface
+with LAMMPS in order to perform the modeling
+of the chromosome structures.
+
+To perform a full modeling step, you may
+want to check out the higher level wrappers
+in the wrappers module.
+'''
+
+
 from __future__ import print_function, division
 import os
 import os.path
@@ -18,6 +49,12 @@ except ImportError:
 from .myio import read_hss, write_hss, read_full_actdist
 from .util import monitor_progress, pretty_tdelta
 from .globals import lammps_executable, float_epsilon
+
+
+__author__  = "Guido Polles"
+__license__ = "GPL"
+__version__ = "0.0.1"
+__email__   = "polles@usc.edu"
 
 
 ARG_DEFAULT = {
@@ -58,9 +95,12 @@ ARG_DEFAULT = {
 
 
 class BondType(object):
-    '''A bond type. The indexes are saved in
-    the 0, N-1 index, while the string is in the 1..N lammps
-    format.'''
+    '''
+    A bond type. The indexes are saved in
+    the *0, ... , N-1* index, while its string
+    representation is in the *1, ..., N* LAMMPS
+    format.
+    '''
     def __init__(self, b_id, type_str, kspring, r0):
         self.id = b_id
         self.kspring = kspring
@@ -84,9 +124,12 @@ class BondType(object):
 
 
 class Bond(object):
-    '''A bond between two atoms. The indexes are saved in
-    the 0, N-1 index, while the string is in the 1..N lammps
-    format.'''
+    '''
+    A bond between two atoms. The indexes are saved in
+    the *0, ... , N-1* index, while its string
+    representation is in the *1, ..., N* LAMMPS
+    format.
+    '''
     def __init__(self, b_id, bond_type, i, j):
         self.id = b_id
         self.bond_type = bond_type
@@ -104,18 +147,36 @@ class Bond(object):
 
 
 class BondContainer(object):
-    '''A container to avoid keeping track of ids and duplicates.
+    '''
+    A container to avoid keeping track of ids and duplicates.
     The dictionary for the types is to avoid re-use of 
     bond_types.
-    This way, the check should be amortized O(1)'''
     
+    This way, the check should be amortized O(1)
+    '''
     def __init__(self):
         self.bond_types = []
         self.bonds = []
         self.bond_type_dict = {}
 
     def add_type(self, type_str, kspring=0.0, r0=0.0):
+        '''
+        Add a bond type.
 
+        :Arguments:
+            *type_str*
+                Either 'harmonic_upper_bound' or 'harmonic_lower_bound'
+
+            *kspring*
+                Spring constant
+
+            *r0*
+                Activation distance (center to center)
+
+        :Outputs:
+            *bt*
+                The corresponding BondType instance  
+        '''
         bt = BondType(len(self.bond_types),
                       type_str,
                       kspring,
@@ -130,6 +191,16 @@ class BondContainer(object):
             return self.bond_types[old_id]
 
     def add_bond(self, bond_type, i, j):
+        '''
+        Add a bond of type *bond_type* between *i* and *j* beads
+
+        :Arguments:
+            *bond_type*
+                A BondType instance returned by the add_type 
+                function
+            *i, j*
+                Integer indexes of the two beads to be bound
+        '''
         bond = Bond(len(self.bonds),
                     bond_type.id,
                     i,
@@ -139,12 +210,30 @@ class BondContainer(object):
 
 
 class DummyAtoms(object):
-    '''this needs an explanation. To enforce distance from center,
-    we use a bond with a dummy atom in the middle. Hovever, if we use
+    '''
+    The dummy atoms class is used to keep track of dummy atoms.
+
+    They are usually connected to multiple atoms (to enforce, 
+    for example, some distance from the cell center).
+    If we use
     the same atom for too many bonds, the dummy atom will set the
     max_bonds parameter for all atoms to a very large number,
-    making memory usage explode. Hence, it's better to have multiple
-    dummy atoms'''
+    letting memory usage explode.
+
+    The solution is to have multiple dummy atoms and
+    use a single atom only for a limited number of
+    bonds.
+
+    DummyAtoms.next() returns the same dummy atom id for 
+    *DummyAtom.max_bonds* (default is 10) times, then updates
+    the number of dummy atoms, making the new atom the 
+    current one. 
+
+    :Constructor Arguments:
+        *n_atoms*
+            The number of real atoms in the system.
+
+    '''
     max_bonds = 10
 
     def __init__(self, n_atoms):
@@ -160,9 +249,11 @@ class DummyAtoms(object):
 
 
 def _chromosome_string_to_numeric_id(chrom):
-    '''Transform a list of strings in numeric
+    '''
+    Transform a list of strings in numeric
     ids (from 1 to N). Multiple chromosome copies
-    will have the same id'''
+    will have the same id
+    '''
     chr_map = {}
     chrom_id = []
     hv = 0
@@ -179,11 +270,151 @@ def _chromosome_string_to_numeric_id(chrom):
 
 
 def generate_input(crd, bead_radii, chrom, **kwargs):
-    '''From coordinates of the beads, their radii
-    and the list of relative chrmosomes, it constructs the
-    input files for running a minimization. Has various arguments,
-    the ones in the ARG_DEFAULT dictionary. This is a quite long
-    function, performing the parsing and the output. '''
+    '''
+    This function generate two input files for
+    the LAMMPS executable.
+
+    :Arguments:
+        *crd (numpy ndarray)*
+            Starting bead coordinates
+
+        *bead_radii (array or list of floats)*
+            Radius of each bead in the system
+
+        *chrom (array or list of strings)*
+            Chromosome tag for each bead
+        
+    :Additional keyword arguments:
+        *nucleus_radius (default=5000.0)*
+            Radius of the nucleus in length units
+
+        *occupancy (default=0.2)*
+            Occupancy defined as the fraction of total volume 
+            occupied by the beads
+
+        *actdist (default=None)*
+            Filename or array of activation distances.
+            Activation distances are a list of records,
+            where each record contains:
+
+            - index of first bead
+
+            - index of second bead
+
+            - the desired contact probability
+
+            - the activation distance
+
+            - the corrected probability from the iterative correction
+
+            - the present probability
+
+        *fish (default=None)*
+            Filename for a FISH target distances file
+
+        *damid (default=None)*
+            Filename or array of lamina DamID activation distances
+
+        *out (default=out.lammpstrj)*
+            Output filename for the lammps trajectory
+
+        *data (default=input.data)*
+            Output filename for the data file
+
+        *lmp (default=minimize.lam)*
+            Output filename for the LAMMPS script file
+
+        *contact_kspring (default=1.0)*
+            Spring costant for contact restraints
+
+        *contact_range (default=2.0)*
+            Distance in units of (:math:`r_{i} + r_{j}`) which defines a
+            contact 
+
+        *fish_type (default="rRpP")*
+            if fish is set, determines the kind of restraints to 
+            impose. If the string contains:
+
+            - *r*: impose minimum radial positions
+
+            - *R*: impose maximum radial positions
+
+            - *p*: impose minimum pairwise distances
+
+            - *P*: impose maximum pairwise distances
+
+        *fish_kspring (default=1.0)*
+            Spring constant for fish restraints
+
+        *fish_tol (default=0.0)*
+            Tolerance for fish restraints, in length units
+
+        *damid_kspring (default=1.0)*
+            Spring constant for DamID restraints
+
+        *damid_tol (default=50.0)*
+            Tolerance for DamID restraints
+
+        *mdsteps (default=20000)*
+            Number of molecular dynamics steps
+
+        *timestep (default=0.25)*
+            Timestep of Molecular Dynamics integrator
+
+        *tstart (default=20.0)*
+            Starting temperature (in :math:`k_BT`)
+
+        *tstop (default=1.0)*
+            Final temperature (in :math:`k_BT`)
+
+        *damp (default=50.0)*
+            Langevin damp parameter in timesteps
+
+        *seed (default=np.random.randint(100000000))*
+            Seed for the random number generator
+
+        *write (default=None)*
+            If set, dumps the coordinates on the trajectory file 
+            every *write* timesteps
+
+        *thermo (default=1000)*
+            Print thermodynamic information to output
+            every *thermo* timesteps
+
+        *max_velocity (default=5.0)*
+            Limit velocity on the NVT integrator (to avoid system explosions)
+
+        *evfactor (default=1.0)*
+            Scale the excluded volume potential by this factor
+
+        *max_neigh (default=2000)*
+            Set the maximum number of neighbor for each atom
+
+        *max_cg_iter (default=500)*
+            Maximum number of Conjugate Gradients iterations
+
+        *max_cg_eval (default=500)*
+            Maximum number of energy evaluations during 
+            Conjugate Gradients
+
+        *etol (default=1e-4)*
+            Tolerance on energy to stop Conjugate Gradients
+
+        *ftol (default=1e-6)*
+            Tolerance on force to stop Conjugate Gradients
+
+        *territories (default=0)*
+            Deprecated.
+            If larger than 0, select a bead every *territories* on each 
+            chromosome, and constrain them to a short distance, to create
+            chromosome territories
+
+        *soft_min (default=0)*
+            Deprecated.
+            
+            All simulations now use a soft potential. It can be tuned 
+            setting *evfactor*
+    '''
     import numpy as np
 
     args = {k: v for k, v in ARG_DEFAULT.items()}
@@ -714,13 +945,78 @@ def get_last_frame(fh):
 
 
 def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
-    ''' lammps_minimize: calls lammps on files on
-    /dev/shm for performance, and checks execution
-    result and final energies '''
+    '''
+    Actual minimization wrapper.
+    
+    After creating the input and data files for lammps,
+    runs the lammps executable in a process (using subprocess.Popen).
 
-    data_fname = '{}/{}.data'.format(tmp_files_dir, run_name)
-    script_fname = '{}/{}.lam'.format(tmp_files_dir, run_name)
-    traj_fname = '{}/{}.lammpstrj'.format(tmp_files_dir, run_name)
+    This function is internally called by the higher level 
+    parallel wrappers.
+
+    When the program returns, it parses the output and returns the 
+    results.
+
+    :Arguments:
+        *crd (numpy array)*
+            Initial coordinates (n_beads x 3 array).
+
+        *radii (list of floats)*
+            Radius for each particle in the system
+
+        *chrom (list of strings)*
+            Chromosome name for each particle. Note that chain
+            breaks are determined by changes in the chrom
+            value
+
+        *run_name (string)* 
+            Name of the run - determines only the name of temporary 
+            files.
+
+        *tmp_files_dir (string)*
+            Location of temporary files. Of course, it needs to be 
+            writable. 
+
+            The default value, **/dev/shm** is usually a in-memory file 
+            system, useful to share data between processes without
+            actually writing to a physical disk.
+
+            The function checks for exceptions and try to remove
+            the temporary files. If the interpreter is killed without
+            being able to catch exceptions (for example because of
+            a walltime limit) some files could be left behind.
+
+        *log_dir (string)*
+            Deprecated, no effect at all.
+
+        *check_violations (bool)*
+            Perform a check on the violations on the assigned 
+            bonds. If set to **False**, the check is skipped
+            and the violation output will be an empty list.
+
+        *\*\*kwargs*
+            Optional minimization arguments. (see lammps.generate_input)
+
+    :Output:
+        *new_crd (numpy ndarray)*
+            Coordinates after minimization.
+
+        *info (dict)*
+            Dictionary with summarized info for the run, as returned by
+            lammps.get_info_from_log.
+
+        *violations (list)*
+            List of violations. If the check_violations parameter is set
+            to False, returns an empty list.
+
+    Exceptions:
+        If the lammps executable return code is different from 0, it
+        raises a RuntimeError with the contents of the standard error.
+    '''
+
+    data_fname = os.path.join(tmp_files_dir, run_name + '.data')
+    script_fname = os.path.join(tmp_files_dir, run_name + '.lam')
+    traj_fname = os.path.join(tmp_files_dir, run_name + '.lammpstrj')
 
     try:
 
@@ -738,15 +1034,9 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
             output, error = proc.communicate()
 
         if proc.returncode != 0:
-            error_dump = '{}/{}.lammps.err'.format(log_dir, run_name)
-            output_dump = '{}/{}.lammps.log'.format(log_dir, run_name)
-            with open(error_dump, 'w') as fd:
-                fd.write(error)
-
-            with open(output_dump, 'w') as fd:
-                fd.write(output)
-
-            raise RuntimeError('LAMMPS exited with non-zero exit code')
+            raise RuntimeError('LAMMPS exited with non-zero exit code: %d\nStandard Error:\n%s\n', 
+                               proc.returncode, 
+                               error)
 
         # get results
         info = get_info_from_log(StringIO(unicode(output)))
@@ -887,13 +1177,34 @@ def bulk_minimize(parallel_client,
         raise
 
     
-def serial_lammps_call(largs):
+def _serial_lammps_call(largs):
     '''
-    Serial function to be mapped in parallel. 
-    largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) 
-    Reads parameters and coordinates from disk, perform minimization,
-    and return run information in a dictionary (see get_info_from_log).
-    In case of failure, gracefully returns None and the traceback.
+    Serial function to be mapped in parallel.
+
+    It is intended to be used only internally by parallel routines.
+
+    :Arguments: 
+        *largs (tuple)* 
+            Triplet of filenames: (from, parameters, to). *from* and *to*
+            are hms files, parameters is a json dictionary of arguments
+            to the lammps_minimize call
+    
+    :Output:
+        *returncode*
+            0 if success, None otherwise
+
+        *info*
+            Dictionary of info returned by lammps_minimize. If the 
+            run fails, info is set to the formatted traceback
+            string
+
+        *n_violations*
+            Number of violated restraint at the end of minimization;
+            is set to zero in case of failure.
+
+    :Exceptions:
+        In case of failure, gracefully returns None and the traceback
+        (see above)
     '''
     try:
         # importing here so it will be called on the parallel workers
@@ -941,14 +1252,66 @@ def bulk_minimize_single_file(parallel_client,
                               ignore_restart=False,
                               **kwargs):
     '''
-    Uses ipyparallel to minimize n_struct structures.
-    parallel_client is an instance of ipyparallel.Client
-    The filenames are expected to be in the form
-    prefix_<structure id>.hms 
-    Maps the minimization to the workers and return statistics
-    for the whole run. If one or more of the minimizations
-    fails, it will raise a RuntimeError.
+    Uses ipyparallel to minimize a population of structures.
+
+    :Arguments:
+        *parallel_client (ipyparallel.Client instance)* 
+            The ipyparallel.Client instance to send the jobs to
+
+        *old_prefix (string)*
+            The function will search for files named 
+            *old_prefix_<n>.hms* in the working directory, with *n*
+            in the range 0, ..., *n_struct*
+
+        *new prefix (string)*
+            After minimization, *n_struct* new files 
+            named *new_prefix_<n>.hms* will be written to the
+            working directory
+
+        *n_struct (int)*
+            Number of structures in the population
+
+        *workdir (string)*
+            Set the working directory where the hms files will
+            be found and written.
+
+        *tmp_files_dir (string)*
+            Directory where to store temporary files
+
+        *log_dir (string)*
+            Eventual errors will be dumped to this directory
+
+        *check_violations (bool)*
+            If set to False, skip the violations check
+
+        *ignore_restart (bool)*
+            If set to True, the function will not check the
+            presence of files named *new_prefix_<n>.hms*
+            in the working directory. All the runs will be 
+            re-sent and eventual files already present 
+            will be overwritten.
+
+        *\*\*kwargs*
+            Other keyword arguments to pass to the minimization
+            process. See lammps.generate_input documentation for
+            details
+
+    :Output:
+        *now_completed*
+            Number of completed minimizations in this call
+
+        *n_violated*
+            Number of structures with violations in this call
+
+        Additionally, *now_completed* files 
+        named *new_prefix_<n>.hms*
+        will be written in the *work_dir* directory.
+    
+    :Exceptions:
+        If one or more of the minimizations
+        fails, it will raise a RuntimeError.
     '''
+
     # get the logger
     logger = logging.getLogger()
 
@@ -993,7 +1356,7 @@ def bulk_minimize_single_file(parallel_client,
         lbv = parallel_client.load_balanced_view()
 
         logger.info('bulk_minimize(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
-        ar = lbv.map_async(serial_lammps_call, pargs)
+        ar = lbv.map_async(_serial_lammps_call, pargs)
         logger.debug('bulk_minimize(): map_async sent.')
 
         # monitor progress

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (C) 2015 University of Southern California and
+# Copyright (C) 2016 University of Southern California and
 #                        Guido Polles
 # 
 # Authors: Guido Polles, Nan Hua

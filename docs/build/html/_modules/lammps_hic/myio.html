@@ -172,6 +172,7 @@
 
 <span class="k">def</span> <span class="nf">pack_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">hss</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">violations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">remove_after</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
     <span class="k">try</span><span class="p">:</span>
+        <span class="n">n_violated</span> <span class="o">=</span> <span class="mi">0</span>
         <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_beads</span><span class="p">,</span> <span class="n">cviol</span><span class="p">,</span> <span class="n">cinfo</span> <span class="o">=</span> <span class="n">read_hms</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
         
         <span class="k">def</span> <span class="nf">_vprint</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">):</span>
@@ -197,6 +198,8 @@
             <span class="n">hss_file</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">crd</span>
 
         <span class="k">if</span> <span class="n">violations</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">n_violated</span> <span class="o">+=</span> <span class="mi">1</span>
             <span class="n">violations_file</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">violations</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span>
             <span class="n">_vprint</span><span class="p">(</span><span class="n">violations_file</span><span class="p">,</span> <span class="n">cviol</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
 
@@ -234,6 +237,8 @@
 
         <span class="k">if</span> <span class="n">remove_after</span><span class="p">:</span>
             <span class="n">remove_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">n_violated</span>
 
     <span class="k">except</span><span class="p">:</span> <span class="c1"># let&#39;s make sure the hdf5 file is removed, else weird stuff happens</span>
         <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">hss</span><span class="p">):</span>

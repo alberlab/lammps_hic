@@ -10,6 +10,12 @@ Welcome to LammpsHiC's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   wrappers
+   lammps
+   actdist
+   myio
+   random
+
 
 
 Indices and tables

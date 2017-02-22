@@ -49,7 +49,38 @@
           <div class="body" role="main">
             
   <h1>Source code for lammps_hic.lammps</h1><div class="highlight"><pre>
-<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
+<span></span><span class="ch">#!/usr/bin/env python</span>
+
+<span class="c1"># Copyright (C) 2016 University of Southern California and</span>
+<span class="c1">#                        Guido Polles</span>
+<span class="c1"># </span>
+<span class="c1"># Authors: Guido Polles, Nan Hua</span>
+<span class="c1"># </span>
+<span class="c1"># This program is free software: you can redistribute it and/or modify</span>
+<span class="c1"># it under the terms of the GNU General Public License as published by</span>
+<span class="c1"># the Free Software Foundation, either version 3 of the License, or</span>
+<span class="c1"># (at your option) any later version.</span>
+<span class="c1"># </span>
+<span class="c1"># This program is distributed in the hope that it will be useful,</span>
+<span class="c1"># but WITHOUT ANY WARRANTY; without even the implied warranty of</span>
+<span class="c1"># MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the</span>
+<span class="c1"># GNU General Public License for more details.</span>
+<span class="c1"># </span>
+<span class="c1"># You should have received a copy of the GNU General Public License</span>
+<span class="c1"># along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.</span>
+
+<span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">The **lammps** module provides function to interface</span>
+<span class="sd">with LAMMPS in order to perform the modeling</span>
+<span class="sd">of the chromosome structures.</span>
+
+<span class="sd">To perform a full modeling step, you may</span>
+<span class="sd">want to check out the higher level wrappers</span>
+<span class="sd">in the wrappers module.</span>
+<span class="sd">&#39;&#39;&#39;</span>
+
+
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
 <span class="kn">import</span> <span class="nn">os</span>
 <span class="kn">import</span> <span class="nn">os.path</span>
 <span class="kn">import</span> <span class="nn">h5py</span>
@@ -69,6 +100,12 @@
 <span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">read_hss</span><span class="p">,</span> <span class="n">write_hss</span><span class="p">,</span> <span class="n">read_full_actdist</span>
 <span class="kn">from</span> <span class="nn">.util</span> <span class="k">import</span> <span class="n">monitor_progress</span><span class="p">,</span> <span class="n">pretty_tdelta</span>
 <span class="kn">from</span> <span class="nn">.globals</span> <span class="k">import</span> <span class="n">lammps_executable</span><span class="p">,</span> <span class="n">float_epsilon</span>
+
+
+<span class="n">__author__</span>  <span class="o">=</span> <span class="s2">&quot;Guido Polles&quot;</span>
+<span class="n">__license__</span> <span class="o">=</span> <span class="s2">&quot;GPL&quot;</span>
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.1&quot;</span>
+<span class="n">__email__</span>   <span class="o">=</span> <span class="s2">&quot;polles@usc.edu&quot;</span>
 
 
 <span class="n">ARG_DEFAULT</span> <span class="o">=</span> <span class="p">{</span>
@@ -108,10 +145,13 @@
 <span class="p">}</span>
 
 
-<div class="viewcode-block" id="BondType"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondType">[docs]</a><span class="k">class</span> <span class="nc">BondType</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;A bond type. The indexes are saved in</span>
-<span class="sd">    the 0, N-1 index, while the string is in the 1..N lammps</span>
-<span class="sd">    format.&#39;&#39;&#39;</span>
+<span class="k">class</span> <span class="nc">BondType</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    A bond type. The indexes are saved in</span>
+<span class="sd">    the *0, ... , N-1* index, while its string</span>
+<span class="sd">    representation is in the *1, ..., N* LAMMPS</span>
+<span class="sd">    format.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b_id</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="p">,</span> <span class="n">r0</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">b_id</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span> <span class="o">=</span> <span class="n">kspring</span>
@@ -131,13 +171,16 @@
 
 
     <span class="k">def</span> <span class="nf">__hash__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="nb">hash</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">r0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span><span class="p">))</span></div>
+        <span class="k">return</span> <span class="nb">hash</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">r0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">kspring</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">type_str</span><span class="p">))</span>
 
 
-<div class="viewcode-block" id="Bond"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.Bond">[docs]</a><span class="k">class</span> <span class="nc">Bond</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;A bond between two atoms. The indexes are saved in</span>
-<span class="sd">    the 0, N-1 index, while the string is in the 1..N lammps</span>
-<span class="sd">    format.&#39;&#39;&#39;</span>
+<span class="k">class</span> <span class="nc">Bond</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    A bond between two atoms. The indexes are saved in</span>
+<span class="sd">    the *0, ... , N-1* index, while its string</span>
+<span class="sd">    representation is in the *1, ..., N* LAMMPS</span>
+<span class="sd">    format.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b_id</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="n">b_id</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bond_type</span> <span class="o">=</span> <span class="n">bond_type</span>
@@ -151,15 +194,17 @@
                                     <span class="bp">self</span><span class="o">.</span><span class="n">j</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span> 
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">__dict__</span></div>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__dict__</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">__dict__</span>
 
 
 <div class="viewcode-block" id="BondContainer"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer">[docs]</a><span class="k">class</span> <span class="nc">BondContainer</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;A container to avoid keeping track of ids and duplicates.</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    A container to avoid keeping track of ids and duplicates.</span>
 <span class="sd">    The dictionary for the types is to avoid re-use of </span>
 <span class="sd">    bond_types.</span>
-<span class="sd">    This way, the check should be amortized O(1)&#39;&#39;&#39;</span>
-    
+<span class="sd">    </span>
+<span class="sd">    This way, the check should be amortized O(1)</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span> <span class="o">=</span> <span class="p">[]</span>
@@ -190,12 +235,30 @@
 
 
 <div class="viewcode-block" id="DummyAtoms"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.DummyAtoms">[docs]</a><span class="k">class</span> <span class="nc">DummyAtoms</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;this needs an explanation. To enforce distance from center,</span>
-<span class="sd">    we use a bond with a dummy atom in the middle. Hovever, if we use</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    The dummy atoms class is used to keep track of dummy atoms.</span>
+
+<span class="sd">    They are usually connected to multiple atoms (to enforce, </span>
+<span class="sd">    for example, some distance from the cell center).</span>
+<span class="sd">    If we use</span>
 <span class="sd">    the same atom for too many bonds, the dummy atom will set the</span>
 <span class="sd">    max_bonds parameter for all atoms to a very large number,</span>
-<span class="sd">    making memory usage explode. Hence, it&#39;s better to have multiple</span>
-<span class="sd">    dummy atoms&#39;&#39;&#39;</span>
+<span class="sd">    letting memory usage explode.</span>
+
+<span class="sd">    The solution is to have multiple dummy atoms and</span>
+<span class="sd">    use a single atom only for a limited number of</span>
+<span class="sd">    bonds.</span>
+
+<span class="sd">    DummyAtoms.next() returns the same dummy atom id for </span>
+<span class="sd">    *DummyAtom.max_bonds* (default is 10) times, then updates</span>
+<span class="sd">    the number of dummy atoms, making the new atom the </span>
+<span class="sd">    current one. </span>
+
+<span class="sd">    :Constructor Arguments:</span>
+<span class="sd">        *n_atoms*</span>
+<span class="sd">            The number of real atoms in the system.</span>
+
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="n">max_bonds</span> <span class="o">=</span> <span class="mi">10</span>
 
     <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_atoms</span><span class="p">):</span>
@@ -211,9 +274,11 @@
 
 
 <span class="k">def</span> <span class="nf">_chromosome_string_to_numeric_id</span><span class="p">(</span><span class="n">chrom</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;Transform a list of strings in numeric</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Transform a list of strings in numeric</span>
 <span class="sd">    ids (from 1 to N). Multiple chromosome copies</span>
-<span class="sd">    will have the same id&#39;&#39;&#39;</span>
+<span class="sd">    will have the same id</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="n">chr_map</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="n">chrom_id</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="n">hv</span> <span class="o">=</span> <span class="mi">0</span>
@@ -230,11 +295,149 @@
 
 
 <div class="viewcode-block" id="generate_input"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.generate_input">[docs]</a><span class="k">def</span> <span class="nf">generate_input</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">bead_radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;From coordinates of the beads, their radii</span>
-<span class="sd">    and the list of relative chrmosomes, it constructs the</span>
-<span class="sd">    input files for running a minimization. Has various arguments,</span>
-<span class="sd">    the ones in the ARG_DEFAULT dictionary. This is a quite long</span>
-<span class="sd">    function, performing the parsing and the output. &#39;&#39;&#39;</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    This function generate two input files for</span>
+<span class="sd">    the LAMMPS executable.</span>
+
+<span class="sd">    :Arguments:</span>
+<span class="sd">        *crd (numpy ndarray)*</span>
+<span class="sd">            Starting bead coordinates</span>
+
+<span class="sd">        *bead_radii (array or list of floats)*</span>
+<span class="sd">            Radius of each bead in the system</span>
+
+<span class="sd">        *chrom (array or list of strings)*</span>
+<span class="sd">            Chromosome tag for each bead</span>
+<span class="sd">        </span>
+<span class="sd">    :Additional keyword arguments:</span>
+<span class="sd">        *nucleus_radius (default=5000.0)*</span>
+<span class="sd">            Radius of the nucleus in length units</span>
+
+<span class="sd">        *occupancy (default=0.2)*</span>
+<span class="sd">            Occupancy defined as the fraction of total volume </span>
+<span class="sd">            occupied by the beads</span>
+
+<span class="sd">        *actdist (default=None)*</span>
+<span class="sd">            Filename or array of activation distances.</span>
+<span class="sd">            Activation distances are a list of records,</span>
+<span class="sd">            where each record contains:</span>
+<span class="sd">            - index of first bead</span>
+
+<span class="sd">            - index of second bead</span>
+
+<span class="sd">            - the desired contact probability</span>
+
+<span class="sd">            - the activation distance</span>
+
+<span class="sd">            - the corrected probability from the iterative correction</span>
+
+<span class="sd">            - the present probability</span>
+
+<span class="sd">        *fish (default=None)*</span>
+<span class="sd">            Filename for a FISH target distances file</span>
+
+<span class="sd">        *damid (default=None)*</span>
+<span class="sd">            Filename or array of lamina DamID activation distances</span>
+
+<span class="sd">        *out (default=out.lammpstrj)*</span>
+<span class="sd">            Output filename for the lammps trajectory</span>
+
+<span class="sd">        *data (default=input.data)*</span>
+<span class="sd">            Output filename for the data file</span>
+
+<span class="sd">        *lmp (default=minimize.lam)*</span>
+<span class="sd">            Output filename for the LAMMPS script file</span>
+
+<span class="sd">        *contact_kspring (default=1.0)*</span>
+<span class="sd">            Spring costant for contact restraints</span>
+
+<span class="sd">        *contact_range (default=2.0)*</span>
+<span class="sd">            Distance in units of (:math:`r_{i} + r_{j}`) which defines a</span>
+<span class="sd">            contact </span>
+
+<span class="sd">        *fish_type (default=&quot;rRpP&quot;)*</span>
+<span class="sd">            if fish is set, determines the kind of restraints to </span>
+<span class="sd">            impose. If the string contains:</span>
+<span class="sd">            - *r*: impose minimum radial positions</span>
+
+<span class="sd">            - *R*: impose maximum radial positions</span>
+
+<span class="sd">            - *p*: impose minimum pairwise distances</span>
+
+<span class="sd">            - *P*: impose maximum pairwise distances</span>
+
+<span class="sd">        *fish_kspring (default=1.0)*</span>
+<span class="sd">            Spring constant for fish restraints</span>
+
+<span class="sd">        *fish_tol (default=0.0)*</span>
+<span class="sd">            Tolerance for fish restraints, in length units</span>
+
+<span class="sd">        *damid_kspring (default=1.0)*</span>
+<span class="sd">            Spring constant for DamID restraints</span>
+
+<span class="sd">        *damid_tol (default=50.0)*</span>
+<span class="sd">            Tolerance for DamID restraints</span>
+
+<span class="sd">        *mdsteps (default=20000)*</span>
+<span class="sd">            Number of molecular dynamics steps</span>
+
+<span class="sd">        *timestep (default=0.25)*</span>
+<span class="sd">            Timestep of Molecular Dynamics integrator</span>
+
+<span class="sd">        *tstart (default=20.0)*</span>
+<span class="sd">            Starting temperature (in :math:`k_BT`)</span>
+
+<span class="sd">        *tstop (default=1.0)*</span>
+<span class="sd">            Final temperature (in :math:`k_BT`)</span>
+
+<span class="sd">        *damp (default=50.0)*</span>
+<span class="sd">            Langevin damp parameter in timesteps</span>
+
+<span class="sd">        *seed (default=np.random.randint(100000000))*</span>
+<span class="sd">            Seed for the random number generator</span>
+
+<span class="sd">        *write (default=None)*</span>
+<span class="sd">            If set, dumps the coordinates on the trajectory file </span>
+<span class="sd">            every *write* timesteps</span>
+
+<span class="sd">        *thermo (default=1000)*</span>
+<span class="sd">            Print thermodynamic information to output</span>
+<span class="sd">            every *thermo* timesteps</span>
+
+<span class="sd">        *max_velocity (default=5.0)*</span>
+<span class="sd">            Limit velocity on the NVT integrator (to avoid system explosions)</span>
+
+<span class="sd">        *evfactor (default=1.0)*</span>
+<span class="sd">            Scale the excluded volume potential by this factor</span>
+
+<span class="sd">        *max_neigh (default=2000)*</span>
+<span class="sd">            Set the maximum number of neighbor for each atom</span>
+
+<span class="sd">        *max_cg_iter (default=500)*</span>
+<span class="sd">            Maximum number of Conjugate Gradients iterations</span>
+
+<span class="sd">        *max_cg_eval (default=500)*</span>
+<span class="sd">            Maximum number of energy evaluations during </span>
+<span class="sd">            Conjugate Gradients</span>
+
+<span class="sd">        *etol (default=1e-4)*</span>
+<span class="sd">            Tolerance on energy to stop Conjugate Gradients</span>
+
+<span class="sd">        *ftol (default=1e-6)*</span>
+<span class="sd">            Tolerance on force to stop Conjugate Gradients</span>
+
+<span class="sd">        *territories (default=0)*</span>
+<span class="sd">            Deprecated.</span>
+<span class="sd">            If larger than 0, select a bead every *territories* on each </span>
+<span class="sd">            chromosome, and constrain them to a short distance, to create</span>
+<span class="sd">            chromosome territories</span>
+
+<span class="sd">        *soft_min (default=0)*</span>
+<span class="sd">            Deprecated.</span>
+<span class="sd">            </span>
+<span class="sd">            All simulations now use a soft potential. It can be tuned </span>
+<span class="sd">            setting *evfactor*</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 
     <span class="n">args</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ARG_DEFAULT</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
@@ -670,12 +873,14 @@
             <span class="k">if</span> <span class="n">d</span> <span class="o">&gt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
-                <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+                <span class="k">if</span> <span class="n">absv</span> <span class="o">&gt;</span> <span class="n">float_epsilon</span><span class="p">:</span>
+                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
         <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">d</span> <span class="o">&lt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
-                <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+                <span class="k">if</span> <span class="n">absv</span> <span class="o">&gt;</span> <span class="n">float_epsilon</span><span class="p">:</span>
+                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
     <span class="k">return</span> <span class="n">violations</span>
 
 
@@ -711,7 +916,7 @@
         <span class="k">yield</span> <span class="n">segment</span>
 
 
-<div class="viewcode-block" id="get_info_from_log"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.get_info_from_log">[docs]</a><span class="k">def</span> <span class="nf">get_info_from_log</span><span class="p">(</span><span class="n">output</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">get_info_from_log</span><span class="p">(</span><span class="n">output</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39; gets final energy, excluded volume energy and bond energy.</span>
 <span class="sd">    TODO: get more info? &#39;&#39;&#39;</span>
     <span class="n">info</span> <span class="o">=</span> <span class="p">{}</span>
@@ -733,7 +938,7 @@
     
     <span class="c1"># EN=`grep -A 1 &quot;Energy initial, next-to-last, final =&quot; $LAMMPSLOGTMP \</span>
     <span class="c1"># | tail -1 | awk &#39;{print $3}&#39;`</span>
-    <span class="k">return</span> <span class="n">info</span></div>
+    <span class="k">return</span> <span class="n">info</span>
 
 
 <span class="k">def</span> <span class="nf">get_last_frame</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
@@ -763,13 +968,78 @@
 
 
 <div class="viewcode-block" id="lammps_minimize"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.lammps_minimize">[docs]</a><span class="k">def</span> <span class="nf">lammps_minimize</span><span class="p">(</span><span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">run_name</span><span class="p">,</span> <span class="n">tmp_files_dir</span><span class="o">=</span><span class="s1">&#39;/dev/shm&#39;</span><span class="p">,</span> <span class="n">log_dir</span><span class="o">=</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="n">check_violations</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39; lammps_minimize: calls lammps on files on</span>
-<span class="sd">    /dev/shm for performance, and checks execution</span>
-<span class="sd">    result and final energies &#39;&#39;&#39;</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Actual minimization wrapper.</span>
+<span class="sd">    </span>
+<span class="sd">    After creating the input and data files for lammps,</span>
+<span class="sd">    runs the lammps executable in a process (using subprocess.Popen).</span>
 
-    <span class="n">data_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.data&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
-    <span class="n">script_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lam&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
-    <span class="n">traj_fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammpstrj&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
+<span class="sd">    This function is internally called by the higher level </span>
+<span class="sd">    parallel wrappers.</span>
+
+<span class="sd">    When the program returns, it parses the output and returns the </span>
+<span class="sd">    results.</span>
+
+<span class="sd">    :Arguments:</span>
+<span class="sd">        *crd (numpy array)*</span>
+<span class="sd">            Initial coordinates (n_beads x 3 array).</span>
+
+<span class="sd">        *radii (list of floats)*</span>
+<span class="sd">            Radius for each particle in the system</span>
+
+<span class="sd">        *chrom (list of strings)*</span>
+<span class="sd">            Chromosome name for each particle. Note that chain</span>
+<span class="sd">            breaks are determined by changes in the chrom</span>
+<span class="sd">            value</span>
+
+<span class="sd">        *run_name (string)* </span>
+<span class="sd">            Name of the run - determines only the name of temporary </span>
+<span class="sd">            files.</span>
+
+<span class="sd">        *tmp_files_dir (string)*</span>
+<span class="sd">            Location of temporary files. Of course, it needs to be </span>
+<span class="sd">            writable. </span>
+
+<span class="sd">            The default value, **/dev/shm** is usually a in-memory file </span>
+<span class="sd">            system, useful to share data between processes without</span>
+<span class="sd">            actually writing to a physical disk.</span>
+
+<span class="sd">            The function checks for exceptions and try to remove</span>
+<span class="sd">            the temporary files. If the interpreter is killed without</span>
+<span class="sd">            being able to catch exceptions (for example because of</span>
+<span class="sd">            a walltime limit) some files could be left behind.</span>
+
+<span class="sd">        *log_dir (string)*</span>
+<span class="sd">            Deprecated, no effect at all.</span>
+
+<span class="sd">        *check_violations (bool)*</span>
+<span class="sd">            Perform a check on the violations on the assigned </span>
+<span class="sd">            bonds. If set to **False**, the check is skipped</span>
+<span class="sd">            and the violation output will be an empty list.</span>
+
+<span class="sd">        *\*\*kwargs*</span>
+<span class="sd">            Optional minimization arguments. (see lammps.generate_input)</span>
+
+<span class="sd">    :Output:</span>
+<span class="sd">        *new_crd (numpy ndarray)*</span>
+<span class="sd">            Coordinates after minimization.</span>
+
+<span class="sd">        *info (dict)*</span>
+<span class="sd">            Dictionary with summarized info for the run, as returned by</span>
+<span class="sd">            lammps.get_info_from_log.</span>
+
+<span class="sd">        *violations (list)*</span>
+<span class="sd">            List of violations. If the check_violations parameter is set</span>
+<span class="sd">            to False, returns an empty list.</span>
+
+<span class="sd">    Exceptions:</span>
+<span class="sd">        If the lammps executable return code is different from 0, it</span>
+<span class="sd">        raises a RuntimeError with the contents of the standard error.</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="n">data_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span> <span class="o">+</span> <span class="s1">&#39;.data&#39;</span><span class="p">)</span>
+    <span class="n">script_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span> <span class="o">+</span> <span class="s1">&#39;.lam&#39;</span><span class="p">)</span>
+    <span class="n">traj_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmp_files_dir</span><span class="p">,</span> <span class="n">run_name</span> <span class="o">+</span> <span class="s1">&#39;.lammpstrj&#39;</span><span class="p">)</span>
 
     <span class="k">try</span><span class="p">:</span>
 
@@ -787,15 +1057,9 @@
             <span class="n">output</span><span class="p">,</span> <span class="n">error</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">communicate</span><span class="p">()</span>
 
         <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="n">error_dump</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammps.err&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
-            <span class="n">output_dump</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">.lammps.log&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">log_dir</span><span class="p">,</span> <span class="n">run_name</span><span class="p">)</span>
-            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">error_dump</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
-                <span class="n">fd</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
-
-            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_dump</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
-                <span class="n">fd</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
-
-            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;LAMMPS exited with non-zero exit code&#39;</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;LAMMPS exited with non-zero exit code: </span><span class="si">%d</span><span class="se">\n</span><span class="s1">Standard Error:</span><span class="se">\n</span><span class="si">%s</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> 
+                               <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span><span class="p">,</span> 
+                               <span class="n">error</span><span class="p">)</span>
 
         <span class="c1"># get results</span>
         <span class="n">info</span> <span class="o">=</span> <span class="n">get_info_from_log</span><span class="p">(</span><span class="n">StringIO</span><span class="p">(</span><span class="n">unicode</span><span class="p">(</span><span class="n">output</span><span class="p">)))</span>
@@ -936,13 +1200,34 @@
         <span class="k">raise</span>
 
     
-<div class="viewcode-block" id="serial_lammps_call"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.serial_lammps_call">[docs]</a><span class="k">def</span> <span class="nf">serial_lammps_call</span><span class="p">(</span><span class="n">largs</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">_serial_lammps_call</span><span class="p">(</span><span class="n">largs</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    Serial function to be mapped in parallel. </span>
-<span class="sd">    largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) </span>
-<span class="sd">    Reads parameters and coordinates from disk, perform minimization,</span>
-<span class="sd">    and return run information in a dictionary (see get_info_from_log).</span>
-<span class="sd">    In case of failure, gracefully returns None and the traceback.</span>
+<span class="sd">    Serial function to be mapped in parallel.</span>
+
+<span class="sd">    It is intended to be used only internally by parallel routines.</span>
+
+<span class="sd">    :Arguments: </span>
+<span class="sd">        *largs (tuple)* </span>
+<span class="sd">            Triplet of filenames: (from, parameters, to). *from* and *to*</span>
+<span class="sd">            are hms files, parameters is a json dictionary of arguments</span>
+<span class="sd">            to the lammps_minimize call</span>
+<span class="sd">    </span>
+<span class="sd">    :Output:</span>
+<span class="sd">        *returncode*</span>
+<span class="sd">            0 if success, None otherwise</span>
+
+<span class="sd">        *info*</span>
+<span class="sd">            Dictionary of info returned by lammps_minimize. If the </span>
+<span class="sd">            run fails, info is set to the formatted traceback</span>
+<span class="sd">            string</span>
+
+<span class="sd">        *n_violations*</span>
+<span class="sd">            Number of violated restraint at the end of minimization;</span>
+<span class="sd">            is set to zero in case of failure.</span>
+
+<span class="sd">    :Exceptions:</span>
+<span class="sd">        In case of failure, gracefully returns None and the traceback</span>
+<span class="sd">        (see above)</span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="c1"># importing here so it will be called on the parallel workers</span>
@@ -975,7 +1260,7 @@
         <span class="kn">import</span> <span class="nn">sys</span>
         <span class="n">etype</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">tb</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
         <span class="n">infostr</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">traceback</span><span class="o">.</span><span class="n">format_exception</span><span class="p">(</span><span class="n">etype</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">tb</span><span class="p">))</span>
-        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">infostr</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span></div>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">infostr</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
 
     
 
@@ -990,14 +1275,66 @@
                               <span class="n">ignore_restart</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
                               <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    Uses ipyparallel to minimize n_struct structures.</span>
-<span class="sd">    parallel_client is an instance of ipyparallel.Client</span>
-<span class="sd">    The filenames are expected to be in the form</span>
-<span class="sd">    prefix_&lt;structure id&gt;.hms </span>
-<span class="sd">    Maps the minimization to the workers and return statistics</span>
-<span class="sd">    for the whole run. If one or more of the minimizations</span>
-<span class="sd">    fails, it will raise a RuntimeError.</span>
+<span class="sd">    Uses ipyparallel to minimize a population of structures.</span>
+
+<span class="sd">    :Arguments:</span>
+<span class="sd">        *parallel_client (ipyparallel.Client instance)* </span>
+<span class="sd">            The ipyparallel.Client instance to send the jobs to</span>
+
+<span class="sd">        *old_prefix (string)*</span>
+<span class="sd">            The function will search for files named </span>
+<span class="sd">            *old_prefix_&lt;n&gt;.hms* in the working directory, with *n*</span>
+<span class="sd">            in the range 0, ..., *n_struct*</span>
+
+<span class="sd">        *new prefix (string)*</span>
+<span class="sd">            After minimization, *n_struct* new files </span>
+<span class="sd">            named *new_prefix_&lt;n&gt;.hms* will be written to the</span>
+<span class="sd">            working directory</span>
+
+<span class="sd">        *n_struct (int)*</span>
+<span class="sd">            Number of structures in the population</span>
+
+<span class="sd">        *workdir (string)*</span>
+<span class="sd">            Set the working directory where the hms files will</span>
+<span class="sd">            be found and written.</span>
+
+<span class="sd">        *tmp_files_dir (string)*</span>
+<span class="sd">            Directory where to store temporary files</span>
+
+<span class="sd">        *log_dir (string)*</span>
+<span class="sd">            Eventual errors will be dumped to this directory</span>
+
+<span class="sd">        *check_violations (bool)*</span>
+<span class="sd">            If set to False, skip the violations check</span>
+
+<span class="sd">        *ignore_restart (bool)*</span>
+<span class="sd">            If set to True, the function will not check the</span>
+<span class="sd">            presence of files named *new_prefix_&lt;n&gt;.hms*</span>
+<span class="sd">            in the working directory. All the runs will be </span>
+<span class="sd">            re-sent and eventual files already present </span>
+<span class="sd">            will be overwritten.</span>
+
+<span class="sd">        *\*\*kwargs*</span>
+<span class="sd">            Other keyword arguments to pass to the minimization</span>
+<span class="sd">            process. See lammps.generate_input documentation for</span>
+<span class="sd">            details</span>
+
+<span class="sd">    :Output:</span>
+<span class="sd">        *now_completed*</span>
+<span class="sd">            Number of completed minimizations in this call</span>
+
+<span class="sd">        *n_violated*</span>
+<span class="sd">            Number of structures with violations in this call</span>
+
+<span class="sd">        Additionally, *now_completed* files </span>
+<span class="sd">        named *new_prefix_&lt;n&gt;.hms*</span>
+<span class="sd">        will be written in the *work_dir* directory.</span>
+<span class="sd">    </span>
+<span class="sd">    :Exceptions:</span>
+<span class="sd">        If one or more of the minimizations</span>
+<span class="sd">        fails, it will raise a RuntimeError.</span>
 <span class="sd">    &#39;&#39;&#39;</span>
+    
     <span class="c1"># get the logger</span>
     <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
 
@@ -1029,7 +1366,7 @@
                     <span class="n">to_minimize</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
             <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): minimization appears to be already finished.&#39;</span><span class="p">)</span>
-                <span class="k">return</span> <span class="p">[]</span>
+                <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Found </span><span class="si">%d</span><span class="s1"> already minimized structures. Minimizing </span><span class="si">%d</span><span class="s1"> remaining ones&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">))</span>
 
         <span class="c1"># prepare arguments as a list of tuples (map wants a single argument for each call)</span>
@@ -1042,7 +1379,7 @@
         <span class="n">lbv</span> <span class="o">=</span> <span class="n">parallel_client</span><span class="o">.</span><span class="n">load_balanced_view</span><span class="p">()</span>
 
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): Starting bulk minimization of </span><span class="si">%d</span><span class="s1"> structures on </span><span class="si">%d</span><span class="s1"> workers&#39;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_minimize</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">))</span>
-        <span class="n">ar</span> <span class="o">=</span> <span class="n">lbv</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">serial_lammps_call</span><span class="p">,</span> <span class="n">pargs</span><span class="p">)</span>
+        <span class="n">ar</span> <span class="o">=</span> <span class="n">lbv</span><span class="o">.</span><span class="n">map_async</span><span class="p">(</span><span class="n">_serial_lammps_call</span><span class="p">,</span> <span class="n">pargs</span><span class="p">)</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;bulk_minimize(): map_async sent.&#39;</span><span class="p">)</span>
 
         <span class="c1"># monitor progress</span>

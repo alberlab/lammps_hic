@@ -6,7 +6,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>&lt;no title&gt; &#8212; LammpsHiC 0.1 documentation</title>
+    <title>Interface to LAMMPS minimization &#8212; LammpsHiC 0.1 documentation</title>
     
     <link rel="stylesheet" href="_static/classic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -26,7 +26,9 @@
     <script type="text/javascript" src="_static/doctools.js"></script>
     <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <link rel="index" title="Index" href="genindex.html" />
-    <link rel="search" title="Search" href="search.html" /> 
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Activation distances calculation" href="actdist.html" />
+    <link rel="prev" title="High Level Wrapper Classes" href="wrappers.html" /> 
   </head>
   <body role="document">
     <div class="related" role="navigation" aria-label="related navigation">
@@ -38,6 +40,12 @@
         <li class="right" >
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
+        <li class="right" >
+          <a href="actdist.html" title="Activation distances calculation"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="wrappers.html" title="High Level Wrapper Classes"
+             accesskey="P">previous</a> |</li>
         <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
       </ul>
     </div>  
@@ -47,12 +55,357 @@
         <div class="bodywrapper">
           <div class="body" role="main">
             
-  <span class="target" id="module-lammps_hic.lammps"></span><dl class="class">
-<dt id="lammps_hic.lammps.Bond">
-<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">Bond</code><span class="sig-paren">(</span><em>b_id</em>, <em>bond_type</em>, <em>i</em>, <em>j</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#Bond"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.Bond" title="Permalink to this definition">¶</a></dt>
-<dd><p>A bond between two atoms. The indexes are saved in
-the 0, N-1 index, while the string is in the 1..N lammps
-format.</p>
+  <div class="section" id="module-lammps_hic.lammps">
+<span id="interface-to-lammps-minimization"></span><h1>Interface to LAMMPS minimization<a class="headerlink" href="#module-lammps_hic.lammps" title="Permalink to this headline">¶</a></h1>
+<p>The <strong>lammps</strong> module provides function to interface
+with LAMMPS in order to perform the modeling
+of the chromosome structures.</p>
+<p>To perform a full modeling step, you may
+want to check out the higher level wrappers
+in the wrappers module.</p>
+<div class="section" id="basic-functions">
+<h2>Basic functions<a class="headerlink" href="#basic-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="lammps_hic.lammps.bulk_minimize_single_file">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">bulk_minimize_single_file</code><span class="sig-paren">(</span><em>parallel_client</em>, <em>old_prefix</em>, <em>new_prefix</em>, <em>n_struct</em>, <em>workdir='.'</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>ignore_restart=False</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#bulk_minimize_single_file"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.bulk_minimize_single_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Uses ipyparallel to minimize a population of structures.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
+<dt><em>parallel_client (ipyparallel.Client instance)</em> </dt>
+<dd><p class="first last">The ipyparallel.Client instance to send the jobs to</p>
+</dd>
+<dt><em>old_prefix (string)</em></dt>
+<dd><p class="first last">The function will search for files named 
+<em>old_prefix_&lt;n&gt;.hms</em> in the working directory, with <em>n</em>
+in the range 0, ..., <em>n_struct</em></p>
+</dd>
+<dt><em>new prefix (string)</em></dt>
+<dd><p class="first last">After minimization, <em>n_struct</em> new files 
+named <em>new_prefix_&lt;n&gt;.hms</em> will be written to the
+working directory</p>
+</dd>
+<dt><em>n_struct (int)</em></dt>
+<dd><p class="first last">Number of structures in the population</p>
+</dd>
+<dt><em>workdir (string)</em></dt>
+<dd><p class="first last">Set the working directory where the hms files will
+be found and written.</p>
+</dd>
+<dt><em>tmp_files_dir (string)</em></dt>
+<dd><p class="first last">Directory where to store temporary files</p>
+</dd>
+<dt><em>log_dir (string)</em></dt>
+<dd><p class="first last">Eventual errors will be dumped to this directory</p>
+</dd>
+<dt><em>check_violations (bool)</em></dt>
+<dd><p class="first last">If set to False, skip the violations check</p>
+</dd>
+<dt><em>ignore_restart (bool)</em></dt>
+<dd><p class="first last">If set to True, the function will not check the
+presence of files named <em>new_prefix_&lt;n&gt;.hms</em>
+in the working directory. All the runs will be 
+re-sent and eventual files already present 
+will be overwritten.</p>
+</dd>
+<dt><em>**kwargs</em></dt>
+<dd><p class="first last">Other keyword arguments to pass to the minimization
+process. See lammps.generate_input documentation for
+details</p>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Output:</th><td class="field-body"><dl class="first docutils">
+<dt><em>now_completed</em></dt>
+<dd><p class="first last">Number of completed minimizations in this call</p>
+</dd>
+<dt><em>n_violated</em></dt>
+<dd><p class="first last">Number of structures with violations in this call</p>
+</dd>
+</dl>
+<p>Additionally, <em>now_completed</em> files 
+named <em>new_prefix_&lt;n&gt;.hms</em>
+will be written in the <em>work_dir</em> directory.</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Exceptions:</th><td class="field-body"><p class="first last">If one or more of the minimizations
+fails, it will raise a RuntimeError.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.lammps_minimize">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">lammps_minimize</code><span class="sig-paren">(</span><em>crd</em>, <em>radii</em>, <em>chrom</em>, <em>run_name</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#lammps_minimize"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.lammps_minimize" title="Permalink to this definition">¶</a></dt>
+<dd><p>Actual minimization wrapper.</p>
+<p>After creating the input and data files for lammps,
+runs the lammps executable in a process (using subprocess.Popen).</p>
+<p>This function is internally called by the higher level 
+parallel wrappers.</p>
+<p>When the program returns, it parses the output and returns the 
+results.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
+<dt><em>crd (numpy array)</em></dt>
+<dd><p class="first last">Initial coordinates (n_beads x 3 array).</p>
+</dd>
+<dt><em>radii (list of floats)</em></dt>
+<dd><p class="first last">Radius for each particle in the system</p>
+</dd>
+<dt><em>chrom (list of strings)</em></dt>
+<dd><p class="first last">Chromosome name for each particle. Note that chain
+breaks are determined by changes in the chrom
+value</p>
+</dd>
+<dt><em>run_name (string)</em> </dt>
+<dd><p class="first last">Name of the run - determines only the name of temporary 
+files.</p>
+</dd>
+<dt><em>tmp_files_dir (string)</em></dt>
+<dd><p class="first">Location of temporary files. Of course, it needs to be 
+writable.</p>
+<p>The default value, <strong>/dev/shm</strong> is usually a in-memory file 
+system, useful to share data between processes without
+actually writing to a physical disk.</p>
+<p class="last">The function checks for exceptions and try to remove
+the temporary files. If the interpreter is killed without
+being able to catch exceptions (for example because of
+a walltime limit) some files could be left behind.</p>
+</dd>
+<dt><em>log_dir (string)</em></dt>
+<dd><p class="first last">Deprecated, no effect at all.</p>
+</dd>
+<dt><em>check_violations (bool)</em></dt>
+<dd><p class="first last">Perform a check on the violations on the assigned 
+bonds. If set to <strong>False</strong>, the check is skipped
+and the violation output will be an empty list.</p>
+</dd>
+<dt><em>**kwargs</em></dt>
+<dd><p class="first last">Optional minimization arguments. (see lammps.generate_input)</p>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Output:</th><td class="field-body"><dl class="first last docutils">
+<dt><em>new_crd (numpy ndarray)</em></dt>
+<dd><p class="first last">Coordinates after minimization.</p>
+</dd>
+<dt><em>info (dict)</em></dt>
+<dd><p class="first last">Dictionary with summarized info for the run, as returned by
+lammps.get_info_from_log.</p>
+</dd>
+<dt><em>violations (list)</em></dt>
+<dd><p class="first last">List of violations. If the check_violations parameter is set
+to False, returns an empty list.</p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+<dl class="docutils">
+<dt>Exceptions:</dt>
+<dd>If the lammps executable return code is different from 0, it
+raises a RuntimeError with the contents of the standard error.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.lammps.generate_input">
+<code class="descclassname">lammps_hic.lammps.</code><code class="descname">generate_input</code><span class="sig-paren">(</span><em>crd</em>, <em>bead_radii</em>, <em>chrom</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#generate_input"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.generate_input" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function generate two input files for
+the LAMMPS executable.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
+<dt><em>crd (numpy ndarray)</em></dt>
+<dd><p class="first last">Starting bead coordinates</p>
+</dd>
+<dt><em>bead_radii (array or list of floats)</em></dt>
+<dd><p class="first last">Radius of each bead in the system</p>
+</dd>
+<dt><em>chrom (array or list of strings)</em></dt>
+<dd><p class="first last">Chromosome tag for each bead</p>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">Additional keyword arguments:</th></tr>
+<tr class="field-even field"><td>&nbsp;</td><td class="field-body"><dl class="first last docutils">
+<dt><em>nucleus_radius (default=5000.0)</em></dt>
+<dd><p class="first last">Radius of the nucleus in length units</p>
+</dd>
+<dt><em>occupancy (default=0.2)</em></dt>
+<dd><p class="first last">Occupancy defined as the fraction of total volume 
+occupied by the beads</p>
+</dd>
+<dt><em>actdist (default=None)</em></dt>
+<dd><p class="first">Filename or array of activation distances.
+Activation distances are a list of records,
+where each record contains:
+- index of first bead</p>
+<ul class="last simple">
+<li>index of second bead</li>
+<li>the desired contact probability</li>
+<li>the activation distance</li>
+<li>the corrected probability from the iterative correction</li>
+<li>the present probability</li>
+</ul>
+</dd>
+<dt><em>fish (default=None)</em></dt>
+<dd><p class="first last">Filename for a FISH target distances file</p>
+</dd>
+<dt><em>damid (default=None)</em></dt>
+<dd><p class="first last">Filename or array of lamina DamID activation distances</p>
+</dd>
+<dt><em>out (default=out.lammpstrj)</em></dt>
+<dd><p class="first last">Output filename for the lammps trajectory</p>
+</dd>
+<dt><em>data (default=input.data)</em></dt>
+<dd><p class="first last">Output filename for the data file</p>
+</dd>
+<dt><em>lmp (default=minimize.lam)</em></dt>
+<dd><p class="first last">Output filename for the LAMMPS script file</p>
+</dd>
+<dt><em>contact_kspring (default=1.0)</em></dt>
+<dd><p class="first last">Spring costant for contact restraints</p>
+</dd>
+<dt><em>contact_range (default=2.0)</em></dt>
+<dd><p class="first last">Distance in units of (<span class="math">\(r_{i} + r_{j}\)</span>) which defines a
+contact</p>
+</dd>
+<dt><em>fish_type (default=&#8221;rRpP&#8221;)</em></dt>
+<dd><p class="first">if fish is set, determines the kind of restraints to 
+impose. If the string contains:
+- <em>r</em>: impose minimum radial positions</p>
+<ul class="last simple">
+<li><em>R</em>: impose maximum radial positions</li>
+<li><em>p</em>: impose minimum pairwise distances</li>
+<li><em>P</em>: impose maximum pairwise distances</li>
+</ul>
+</dd>
+<dt><em>fish_kspring (default=1.0)</em></dt>
+<dd><p class="first last">Spring constant for fish restraints</p>
+</dd>
+<dt><em>fish_tol (default=0.0)</em></dt>
+<dd><p class="first last">Tolerance for fish restraints, in length units</p>
+</dd>
+<dt><em>damid_kspring (default=1.0)</em></dt>
+<dd><p class="first last">Spring constant for DamID restraints</p>
+</dd>
+<dt><em>damid_tol (default=50.0)</em></dt>
+<dd><p class="first last">Tolerance for DamID restraints</p>
+</dd>
+<dt><em>mdsteps (default=20000)</em></dt>
+<dd><p class="first last">Number of molecular dynamics steps</p>
+</dd>
+<dt><em>timestep (default=0.25)</em></dt>
+<dd><p class="first last">Timestep of Molecular Dynamics integrator</p>
+</dd>
+<dt><em>tstart (default=20.0)</em></dt>
+<dd><p class="first last">Starting temperature (in <span class="math">\(k_BT\)</span>)</p>
+</dd>
+<dt><em>tstop (default=1.0)</em></dt>
+<dd><p class="first last">Final temperature (in <span class="math">\(k_BT\)</span>)</p>
+</dd>
+<dt><em>damp (default=50.0)</em></dt>
+<dd><p class="first last">Langevin damp parameter in timesteps</p>
+</dd>
+<dt><em>seed (default=np.random.randint(100000000))</em></dt>
+<dd><p class="first last">Seed for the random number generator</p>
+</dd>
+<dt><em>write (default=None)</em></dt>
+<dd><p class="first last">If set, dumps the coordinates on the trajectory file 
+every <em>write</em> timesteps</p>
+</dd>
+<dt><em>thermo (default=1000)</em></dt>
+<dd><p class="first last">Print thermodynamic information to output
+every <em>thermo</em> timesteps</p>
+</dd>
+<dt><em>max_velocity (default=5.0)</em></dt>
+<dd><p class="first last">Limit velocity on the NVT integrator (to avoid system explosions)</p>
+</dd>
+<dt><em>evfactor (default=1.0)</em></dt>
+<dd><p class="first last">Scale the excluded volume potential by this factor</p>
+</dd>
+<dt><em>max_neigh (default=2000)</em></dt>
+<dd><p class="first last">Set the maximum number of neighbor for each atom</p>
+</dd>
+<dt><em>max_cg_iter (default=500)</em></dt>
+<dd><p class="first last">Maximum number of Conjugate Gradients iterations</p>
+</dd>
+<dt><em>max_cg_eval (default=500)</em></dt>
+<dd><p class="first last">Maximum number of energy evaluations during 
+Conjugate Gradients</p>
+</dd>
+<dt><em>etol (default=1e-4)</em></dt>
+<dd><p class="first last">Tolerance on energy to stop Conjugate Gradients</p>
+</dd>
+<dt><em>ftol (default=1e-6)</em></dt>
+<dd><p class="first last">Tolerance on force to stop Conjugate Gradients</p>
+</dd>
+<dt><em>territories (default=0)</em></dt>
+<dd><p class="first last">Deprecated.
+If larger than 0, select a bead every <em>territories</em> on each 
+chromosome, and constrain them to a short distance, to create
+chromosome territories</p>
+</dd>
+<dt><em>soft_min (default=0)</em></dt>
+<dd><p class="first">Deprecated.</p>
+<p class="last">All simulations now use a soft potential. It can be tuned 
+setting <em>evfactor</em></p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</div>
+<div class="section" id="helper-classes">
+<h2>Helper classes<a class="headerlink" href="#helper-classes" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="lammps_hic.lammps.DummyAtoms">
+<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">DummyAtoms</code><span class="sig-paren">(</span><em>n_atoms</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#DummyAtoms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.DummyAtoms" title="Permalink to this definition">¶</a></dt>
+<dd><p>The dummy atoms class is used to keep track of dummy atoms.</p>
+<p>They are usually connected to multiple atoms (to enforce, 
+for example, some distance from the cell center).
+If we use
+the same atom for too many bonds, the dummy atom will set the
+max_bonds parameter for all atoms to a very large number,
+letting memory usage explode.</p>
+<p>The solution is to have multiple dummy atoms and
+use a single atom only for a limited number of
+bonds.</p>
+<p>DummyAtoms.next() returns the same dummy atom id for 
+<em>DummyAtom.max_bonds</em> (default is 10) times, then updates
+the number of dummy atoms, making the new atom the 
+current one.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name" colspan="2">Constructor Arguments:</th></tr>
+<tr class="field-odd field"><td>&nbsp;</td><td class="field-body"><dl class="first last docutils">
+<dt><em>n_atoms</em></dt>
+<dd><p class="first last">The number of real atoms in the system.</p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="class">
@@ -60,76 +413,12 @@ format.</p>
 <em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">BondContainer</code><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer" title="Permalink to this definition">¶</a></dt>
 <dd><p>A container to avoid keeping track of ids and duplicates.
 The dictionary for the types is to avoid re-use of 
-bond_types.
-This way, the check should be amortized O(1)</p>
+bond_types.</p>
+<p>This way, the check should be amortized O(1)</p>
 </dd></dl>
 
-<dl class="class">
-<dt id="lammps_hic.lammps.BondType">
-<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">BondType</code><span class="sig-paren">(</span><em>b_id</em>, <em>type_str</em>, <em>kspring</em>, <em>r0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondType"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondType" title="Permalink to this definition">¶</a></dt>
-<dd><p>A bond type. The indexes are saved in
-the 0, N-1 index, while the string is in the 1..N lammps
-format.</p>
-</dd></dl>
-
-<dl class="class">
-<dt id="lammps_hic.lammps.DummyAtoms">
-<em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">DummyAtoms</code><span class="sig-paren">(</span><em>n_atoms</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#DummyAtoms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.DummyAtoms" title="Permalink to this definition">¶</a></dt>
-<dd><p>this needs an explanation. To enforce distance from center,
-we use a bond with a dummy atom in the middle. Hovever, if we use
-the same atom for too many bonds, the dummy atom will set the
-max_bonds parameter for all atoms to a very large number,
-making memory usage explode. Hence, it&#8217;s better to have multiple
-dummy atoms</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.lammps.bulk_minimize_single_file">
-<code class="descclassname">lammps_hic.lammps.</code><code class="descname">bulk_minimize_single_file</code><span class="sig-paren">(</span><em>parallel_client</em>, <em>old_prefix</em>, <em>new_prefix</em>, <em>n_struct</em>, <em>workdir='.'</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>ignore_restart=False</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#bulk_minimize_single_file"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.bulk_minimize_single_file" title="Permalink to this definition">¶</a></dt>
-<dd><p>Uses ipyparallel to minimize n_struct structures.
-parallel_client is an instance of ipyparallel.Client
-The filenames are expected to be in the form
-prefix_&lt;structure id&gt;.hms 
-Maps the minimization to the workers and return statistics
-for the whole run. If one or more of the minimizations
-fails, it will raise a RuntimeError.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.lammps.generate_input">
-<code class="descclassname">lammps_hic.lammps.</code><code class="descname">generate_input</code><span class="sig-paren">(</span><em>crd</em>, <em>bead_radii</em>, <em>chrom</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#generate_input"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.generate_input" title="Permalink to this definition">¶</a></dt>
-<dd><p>From coordinates of the beads, their radii
-and the list of relative chrmosomes, it constructs the
-input files for running a minimization. Has various arguments,
-the ones in the ARG_DEFAULT dictionary. This is a quite long
-function, performing the parsing and the output.</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.lammps.get_info_from_log">
-<code class="descclassname">lammps_hic.lammps.</code><code class="descname">get_info_from_log</code><span class="sig-paren">(</span><em>output</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#get_info_from_log"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.get_info_from_log" title="Permalink to this definition">¶</a></dt>
-<dd><p>gets final energy, excluded volume energy and bond energy.
-TODO: get more info?</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.lammps.lammps_minimize">
-<code class="descclassname">lammps_hic.lammps.</code><code class="descname">lammps_minimize</code><span class="sig-paren">(</span><em>crd</em>, <em>radii</em>, <em>chrom</em>, <em>run_name</em>, <em>tmp_files_dir='/dev/shm'</em>, <em>log_dir='.'</em>, <em>check_violations=True</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#lammps_minimize"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.lammps_minimize" title="Permalink to this definition">¶</a></dt>
-<dd><p>lammps_minimize: calls lammps on files on
-/dev/shm for performance, and checks execution
-result and final energies</p>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.lammps.serial_lammps_call">
-<code class="descclassname">lammps_hic.lammps.</code><code class="descname">serial_lammps_call</code><span class="sig-paren">(</span><em>largs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#serial_lammps_call"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.serial_lammps_call" title="Permalink to this definition">¶</a></dt>
-<dd><p>Serial function to be mapped in parallel. 
-largs is a triplet of filenames: (load_crd_from, parameters, save_crd_to) 
-Reads parameters and coordinates from disk, perform minimization,
-and return run information in a dictionary (see get_info_from_log).
-In case of failure, gracefully returns None and the traceback.</p>
-</dd></dl>
-
+</div>
+</div>
 
 
           </div>
@@ -137,6 +426,21 @@ In case of failure, gracefully returns None and the traceback.</p>
       </div>
       <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
         <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Interface to LAMMPS minimization</a><ul>
+<li><a class="reference internal" href="#basic-functions">Basic functions</a></li>
+<li><a class="reference internal" href="#helper-classes">Helper classes</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="wrappers.html"
+                        title="previous chapter">High Level Wrapper Classes</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="actdist.html"
+                        title="next chapter">Activation distances calculation</a></p>
   <div role="note" aria-label="source link">
     <h3>This Page</h3>
     <ul class="this-page-menu">
@@ -167,6 +471,12 @@ In case of failure, gracefully returns None and the traceback.</p>
         <li class="right" >
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
+        <li class="right" >
+          <a href="actdist.html" title="Activation distances calculation"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="wrappers.html" title="High Level Wrapper Classes"
+             >previous</a> |</li>
         <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
       </ul>
     </div>
