@@ -850,13 +850,13 @@ def _check_violations(bond_list, crd):
             if d > bt.r0:
                 absv = d - bt.r0
                 relv = (d - bt.r0) / bt.r0
-                if absv > float_epsilon:
+                if relv > 0.05:
                     violations.append((bond.i, bond.j, absv, relv, str(bt)))
         if bt.type_str == 'harmonic_lower_bound':
             if d < bt.r0:
                 absv = bt.r0 - d
                 relv = (bt.r0 - d) / bt.r0
-                if absv > float_epsilon:
+                if relv > 0.05:
                     violations.append((bond.i, bond.j, absv, relv, str(bt)))
     return violations
 

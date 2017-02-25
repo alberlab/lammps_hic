@@ -27,7 +27,7 @@
     <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="&lt;no title&gt;" href="lammps.html" />
+    <link rel="next" title="Interface to LAMMPS minimization" href="lammps.html" />
     <link rel="prev" title="Welcome to LammpsHiC’s documentation!" href="index.html" /> 
   </head>
   <body role="document">
@@ -41,7 +41,7 @@
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
         <li class="right" >
-          <a href="lammps.html" title="&lt;no title&gt;"
+          <a href="lammps.html" title="Interface to LAMMPS minimization"
              accesskey="N">next</a> |</li>
         <li class="right" >
           <a href="index.html" title="Welcome to LammpsHiC’s documentation!"
@@ -81,7 +81,7 @@ will be also written here.</p>
 </dd>
 <dt><em>**kwargs</em></dt>
 <dd><p class="first last">additional arguments to be passed to the
-<strong>lammps_hic.lammps.bulk_minimize_single_file</strong> function. 
+<strong>lammps_hic.lammps.bulk_minimize_single_file</strong> function.
 See lammps_hic.lammps documentation for details</p>
 </dd>
 </dl>
@@ -94,8 +94,8 @@ Calling its member <strong>run</strong> function spawns a separate process,
 which will be responsible to connect to the ipyparallel controller
 and perform the parallel minimization of the structures.</p>
 <p>A modeling step requires <em>n_conf</em> files in the <em>workdir</em> directory,
-containing the starting coordinates. 
-The starting file names are expected to be in the 
+containing the starting coordinates.
+The starting file names are expected to be in the
 <em>from_label*_*n</em>.hms format, where <em>n</em> goes from 0 to <em>n_conf</em> - 1.</p>
 <p>It also requires writable <strong>logs</strong>, <strong>structures</strong>, <strong>info</strong> and
 <strong>violations</strong> directories.</p>
@@ -111,13 +111,13 @@ significant violations.</p>
 <li>violations/&lt;to_label&gt;.violations</li>
 <li>info/&lt;to_label&gt;.info</li>
 <li>logs/<em>&lt;to_label&gt;</em>.log</li>
-<li>&lt;n_conf&gt; files, named &lt;workdir&gt;/&lt;to_label&gt;_&lt;n&gt;.hms, 
+<li>&lt;n_conf&gt; files, named &lt;workdir&gt;/&lt;to_label&gt;_&lt;n&gt;.hms,
 with 0 &lt;= n &lt; <em>n_conf</em></li>
 </ul>
 <p>Note that the hms files are redundant, as all the information
-is packed in the other files after the run. <strong>They are however still 
+is packed in the other files after the run. <strong>They are however still
 needed as starting configurations in the next minimization step</strong>.</p>
-<p>A failed minimization will set the <em>failed</em> member to True, and 
+<p>A failed minimization will set the <em>failed</em> member to True, and
 store the formatted traceback string in the <em>error</em> member variable.</p>
 <dl class="attribute">
 <dt id="lammps_hic.wrappers.ModelingStep.error">
@@ -167,8 +167,8 @@ Sets the <strong>failed</strong> befor returning.</p>
 <dd><p class="first last">Considers only contact probabilities greater than theta</p>
 </dd>
 <dt><em>matrix (numpy matrix)</em></dt>
-<dd><p class="first last">Matrix of contact probabilities. 
-TODO: 
+<dd><p class="first last">Matrix of contact probabilities.
+TODO:
 * read filename on the process
 * use a sparse matrix</p>
 </dd>
@@ -187,8 +187,8 @@ Calling its member <strong>run</strong> function spawns a separate process,
 which will be responsible to connect to the ipyparallel controller
 and perform the parallel calculation of activation distances.</p>
 <p>The activation distances step requires a population structures
-file (.hss) and the last activation distances. It ouputs a log 
-and the new actdist file. See documentation for 
+file (.hss) and the last activation distances. It ouputs a log
+and the new actdist file. See documentation for
 lammps_hic.actdist for details on the actdist format.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -230,7 +230,7 @@ distances file.</p>
                         title="previous chapter">Welcome to LammpsHiC&#8217;s documentation!</a></p>
   <h4>Next topic</h4>
   <p class="topless"><a href="lammps.html"
-                        title="next chapter">&lt;no title&gt;</a></p>
+                        title="next chapter">Interface to LAMMPS minimization</a></p>
   <div role="note" aria-label="source link">
     <h3>This Page</h3>
     <ul class="this-page-menu">
@@ -262,7 +262,7 @@ distances file.</p>
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
         <li class="right" >
-          <a href="lammps.html" title="&lt;no title&gt;"
+          <a href="lammps.html" title="Interface to LAMMPS minimization"
              >next</a> |</li>
         <li class="right" >
           <a href="index.html" title="Welcome to LammpsHiC’s documentation!"

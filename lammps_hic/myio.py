@@ -1,3 +1,28 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2016 University of Southern California and
+#                        Guido Polles
+# 
+# Authors: Guido Polles
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+'''
+The **myio** module provides some common IO operations
+functions on hms, hss, actdist files.
+'''
+
 from __future__ import print_function, division
 
 import json
@@ -17,6 +42,24 @@ violations_dtype = np.dtype([('i', 'i4'),
 
 
 def read_full_actdist(filename):
+    '''
+    Reads activation distances.
+
+    Activation distances are a list/array of records.
+    Every record consists of:
+
+    - i (int): first bead index
+
+    - j (int): second bead index
+
+    - pwish (float): the desired contact probability
+
+    - actdist (float): the activation distance
+
+    - pclean (float): the corrected probability from the iterative correction
+
+    - pnow (float): the current contact probability
+    '''
     columns =[('i', int),
               ('j', int),
               ('pwish', float),
@@ -34,18 +77,10 @@ def read_full_actdist(filename):
 
 
 def read_actdist(filename):
-    columns =[('i', int),
-              ('j', int),
-              ('actdist', float),
-             ]
-    if os.path.getsize(filename) > 0:
-        ad = np.genfromtxt(filename, dtype=columns, usecols=(0, 1, 3))
-        if len(ad.shape) == 0:
-            ad = [ad]
-        ad = ad.view(np.recarray)
-    else:
-        ad = []
-    return ad
+    '''
+    Alias for read_full_actdist
+    '''
+    return read_full_actdist(filename)
 
 
 def write_actdist():
@@ -53,6 +88,19 @@ def write_actdist():
 
 
 def read_hss(fname, i=None):
+    '''
+    Reads all information in an hss file:
+
+    - crd (numpy.ndarray(dtype='f4')): population coordinates
+
+    - radii (numpy.ndarray(dtype='f4')): bead radii
+
+    - chrom (numpy.ndarray(dtype=str)): chromosome tags
+
+    - n_struct (int): number of structures
+
+    - n_bead (int): number of beads in one structure
+    '''
     with h5py.File(fname, 'r') as f:
         if i is None:
             crd = f['coordinates'][()]
@@ -66,6 +114,9 @@ def read_hss(fname, i=None):
 
 
 def write_hss(fname, crd, radii, chrom):
+    '''
+    TODO: write docs
+    '''
     if len(radii) != len(crd[0]):
         logging.warning('write_hss(): len(radii) != crd.shape[1]')
 
@@ -81,7 +132,9 @@ def write_hss(fname, crd, radii, chrom):
 
 
 def read_hms(fname):
-
+    '''
+    TODO: write docs
+    '''
     with h5py.File(fname, 'r') as f:
         crd = f['coordinates'][()]
         radii = f['radius'][()]
@@ -93,7 +146,9 @@ def read_hms(fname):
 
 
 def write_hms(fname, crd, radii, chrom, violations=[], info={}):
-    
+    '''
+    TODO: write docs
+    '''
     if len(radii) != len(crd):
         logging.warning('write_hms(): len(radii) != crd.shape[0]')
 
@@ -120,6 +175,9 @@ def remove_hms(prefix, n_struct):
 
 
 def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_after=False):
+    '''
+    TODO: write docs
+    '''
     try:
         n_violated = 0
         crd, radii, chrom, n_beads, cviol, cinfo = read_hms('{}_{}.hms'.format(prefix, 0))

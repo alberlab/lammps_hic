@@ -1,0 +1,293 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Database IO &#8212; LammpsHiC 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Generating random coordinates" href="random.html" />
+    <link rel="prev" title="IO functions" href="myio.html" /> 
+  </head>
+  <body role="document">
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="random.html" title="Generating random coordinates"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="myio.html" title="IO functions"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="database-io">
+<h1>Database IO<a class="headerlink" href="#database-io" title="Permalink to this headline">¶</a></h1>
+<p>This module provides a wrapper class to write/read from a database instead
+of hdf5 files. Uses sqlite3, which is not fast, but should serve well if
+write request are not too frequent.</p>
+<p>Note that a sqlite database will require ~2 times the disk space with
+respect to a hdf5 file</p>
+<div class="section" id="dbstructfile-class-reference">
+<h2>DBStructFile class reference<a class="headerlink" href="#dbstructfile-class-reference" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="lammps_hic.dbio.DBStructFile">
+<em class="property">class </em><code class="descclassname">lammps_hic.dbio.</code><code class="descname">DBStructFile</code><span class="sig-paren">(</span><em>path</em>, <em>mode='a'</em>, <em>n_struct=None</em>, <em>radii=None</em>, <em>chrom=None</em>, <em>description=''</em>, <em>n_retry=5</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile" title="Permalink to this definition">¶</a></dt>
+<dd><p>Interface to use a sqlite database to write coordinates.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>path</strong> (<em>str</em>) &#8211; path of the database file.</li>
+<li><strong>mode</strong> (<em>str</em>) &#8211; one of &#8216;a&#8217;, &#8216;r&#8217; or &#8216;w&#8217;. Defaults to &#8216;a&#8217;.
+&#8216;a&#8217; creates the file if does not exist or works on the existing
+database if it does.
+&#8216;r&#8217; raises an exception if the file does not exist
+&#8216;w&#8217; remove the previous database if the path exists.</li>
+<li><strong>n_struct</strong> (<em>int</em>) &#8211; optional, number of structures</li>
+<li><strong>radii</strong> (<em>np.ndarray</em>) &#8211; optional, radius of the beads</li>
+<li><strong>chrom</strong> (<em>np.ndarray</em>) &#8211; optional, chromosome tags</li>
+<li><strong>description</strong> (<em>str</em>) &#8211; optional, any description string</li>
+<li><strong>n_retry</strong> (<em>int</em>) &#8211; number of retries if got an OperationalError
+while writing/reading</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+<dl class="attribute">
+<dt id="DBStructFile.n_struct">
+<code class="descname">n_struct</code><a class="headerlink" href="#DBStructFile.n_struct" title="Permalink to this definition">¶</a></dt>
+<dd><p><em>int</em> &#8211; number of structures</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="DBStructFile.radii">
+<code class="descname">radii</code><a class="headerlink" href="#DBStructFile.radii" title="Permalink to this definition">¶</a></dt>
+<dd><p><em>np.ndarray</em> &#8211; radius of the beads</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="DBStructFile.chrom">
+<code class="descname">chrom</code><a class="headerlink" href="#DBStructFile.chrom" title="Permalink to this definition">¶</a></dt>
+<dd><p><em>np.ndarray</em> &#8211; chromosome tags</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="DBStructFile.description">
+<code class="descname">description</code><a class="headerlink" href="#DBStructFile.description" title="Permalink to this definition">¶</a></dt>
+<dd><p><em>str</em> &#8211; any description string</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="DBStructFile.n_retry">
+<code class="descname">n_retry</code><a class="headerlink" href="#DBStructFile.n_retry" title="Permalink to this definition">¶</a></dt>
+<dd><p><em>int</em> &#8211; number of retries if got an OperationalError
+while writing/reading</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.dbio.DBStructFile.add_iteration">
+<code class="descname">add_iteration</code><span class="sig-paren">(</span><em>iter_name</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile.add_iteration"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile.add_iteration" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a table to store coordinates, infos, and violations.</p>
+<p>The table name is set to <em>iter_name</em>, so be careful not to
+SQL inject yourself.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>iter_name</strong> (<em>str</em>) &#8211; Name of the iteration, es: &#8216;p0.010a&#8217;, &#8216;p0.010b&#8217;.
+Avoid SQL injections, the function does not check for you.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">None</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.dbio.DBStructFile.get_structure">
+<code class="descname">get_structure</code><span class="sig-paren">(</span><em>iter_name</em>, <em>struct_num</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile.get_structure"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile.get_structure" title="Permalink to this definition">¶</a></dt>
+<dd><p>Retrieve a single structure from the file.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>iter_name</strong> (<em>str</em>) &#8211; Name of the iteration, es: &#8216;p0.010a&#8217;, &#8216;p0.010b&#8217;</li>
+<li><strong>struct_num</strong> (<em>int</em>) &#8211; Number of the structure</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"><p>A list containing coordinates, info and violations.</p>
+<p>(crd (numpy.ndarray), info (dict), violations (list))</p>
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.dbio.DBStructFile.sqldump">
+<code class="descname">sqldump</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile.sqldump"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile.sqldump" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the sql dump of the database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.dbio.DBStructFile.to_hss">
+<code class="descname">to_hss</code><span class="sig-paren">(</span><em>iter_name</em>, <em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile.to_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile.to_hss" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create an hss file from a table (iteration).</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>iter_name</strong> (<em>str</em>) &#8211; Name of the iteration, es: &#8216;p0.010a&#8217;, &#8216;p0.010b&#8217;</li>
+<li><strong>path</strong> (<em>str</em>) &#8211; Output filename</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first">None</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Raises:</th><td class="field-body"><p class="first last">IOError if the number of records do not correspond to n_struct</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.dbio.DBStructFile.write_structure">
+<code class="descname">write_structure</code><span class="sig-paren">(</span><em>iter_name</em>, <em>struct_num</em>, <em>crd</em>, <em>info={}</em>, <em>violations=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/dbio.html#DBStructFile.write_structure"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.dbio.DBStructFile.write_structure" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes a structure to database.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>iter_name</strong> (<em>str</em>) &#8211; Name of the iteration, es: &#8216;p0.010a&#8217;, &#8216;p0.010b&#8217;</li>
+<li><strong>struct_num</strong> (<em>int</em>) &#8211; Number of the structure</li>
+<li><strong>crd</strong> (<em>numpy.ndarray</em>) &#8211; Structure coordinates</li>
+<li><strong>info</strong> (<em>dict</em>) &#8211; Information about the run</li>
+<li><strong>violations</strong> (<em>list</em>) &#8211; List of violations</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">None</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Examples</p>
+<p>f = DBStructFile(&#8216;existing.db&#8217;)
+crd = np.random.random((10,3))
+f.write_structure(&#8216;p0.010a&#8217;, 0, crd)</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Database IO</a><ul>
+<li><a class="reference internal" href="#dbstructfile-class-reference">DBStructFile class reference</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="myio.html"
+                        title="previous chapter">IO functions</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="random.html"
+                        title="next chapter">Generating random coordinates</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/dbio.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="random.html" title="Generating random coordinates"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="myio.html" title="IO functions"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">LammpsHiC 0.1 documentation</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2017, Guido Polles.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.5.2.
+    </div>
+  </body>
+</html>

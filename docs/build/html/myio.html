@@ -27,7 +27,7 @@
     <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Generating random coordinates" href="random.html" />
+    <link rel="next" title="Database IO" href="dbio.html" />
     <link rel="prev" title="Activation distances calculation" href="actdist.html" /> 
   </head>
   <body role="document">
@@ -41,7 +41,7 @@
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
         <li class="right" >
-          <a href="random.html" title="Generating random coordinates"
+          <a href="dbio.html" title="Database IO"
              accesskey="N">next</a> |</li>
         <li class="right" >
           <a href="actdist.html" title="Activation distances calculation"
@@ -57,10 +57,71 @@
             
   <div class="section" id="module-lammps_hic.myio">
 <span id="io-functions"></span><h1>IO functions<a class="headerlink" href="#module-lammps_hic.myio" title="Permalink to this headline">¶</a></h1>
+<p>The <strong>myio</strong> module provides some common IO operations
+functions on hms, hss, actdist files.</p>
+<dl class="function">
+<dt id="lammps_hic.myio.pack_hms">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">pack_hms</code><span class="sig-paren">(</span><em>prefix</em>, <em>n_struct</em>, <em>hss=None</em>, <em>violations=None</em>, <em>info=None</em>, <em>remove_after=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#pack_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.pack_hms" title="Permalink to this definition">¶</a></dt>
+<dd><p>TODO: write docs</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.read_actdist">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">read_actdist</code><span class="sig-paren">(</span><em>filename</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_actdist"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_actdist" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for read_full_actdist</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.read_full_actdist">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">read_full_actdist</code><span class="sig-paren">(</span><em>filename</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_full_actdist"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_full_actdist" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reads activation distances.</p>
+<p>Activation distances are a list/array of records.
+Every record consists of:</p>
+<ul class="simple">
+<li>i (int): first bead index</li>
+<li>j (int): second bead index</li>
+<li>pwish (float): the desired contact probability</li>
+<li>actdist (float): the activation distance</li>
+<li>pclean (float): the corrected probability from the iterative correction</li>
+<li>pnow (float): the current contact probability</li>
+</ul>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.read_hms">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">read_hms</code><span class="sig-paren">(</span><em>fname</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_hms" title="Permalink to this definition">¶</a></dt>
+<dd><p>TODO: write docs</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.read_hss">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">read_hss</code><span class="sig-paren">(</span><em>fname</em>, <em>i=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_hss" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reads all information in an hss file:</p>
+<ul class="simple">
+<li>crd (numpy.ndarray(dtype=&#8217;f4&#8217;)): population coordinates</li>
+<li>radii (numpy.ndarray(dtype=&#8217;f4&#8217;)): bead radii</li>
+<li>chrom (numpy.ndarray(dtype=str)): chromosome tags</li>
+<li>n_struct (int): number of structures</li>
+<li>n_bead (int): number of beads in one structure</li>
+</ul>
+</dd></dl>
+
 <dl class="function">
 <dt id="lammps_hic.myio.remove_hms">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">remove_hms</code><span class="sig-paren">(</span><em>prefix</em>, <em>n_struct</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#remove_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.remove_hms" title="Permalink to this definition">¶</a></dt>
 <dd><p>Removes hms files.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.write_hms">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">write_hms</code><span class="sig-paren">(</span><em>fname</em>, <em>crd</em>, <em>radii</em>, <em>chrom</em>, <em>violations=[]</em>, <em>info={}</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#write_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.write_hms" title="Permalink to this definition">¶</a></dt>
+<dd><p>TODO: write docs</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.myio.write_hss">
+<code class="descclassname">lammps_hic.myio.</code><code class="descname">write_hss</code><span class="sig-paren">(</span><em>fname</em>, <em>crd</em>, <em>radii</em>, <em>chrom</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#write_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.write_hss" title="Permalink to this definition">¶</a></dt>
+<dd><p>TODO: write docs</p>
 </dd></dl>
 
 </div>
@@ -75,8 +136,8 @@
   <p class="topless"><a href="actdist.html"
                         title="previous chapter">Activation distances calculation</a></p>
   <h4>Next topic</h4>
-  <p class="topless"><a href="random.html"
-                        title="next chapter">Generating random coordinates</a></p>
+  <p class="topless"><a href="dbio.html"
+                        title="next chapter">Database IO</a></p>
   <div role="note" aria-label="source link">
     <h3>This Page</h3>
     <ul class="this-page-menu">
@@ -108,7 +169,7 @@
           <a href="py-modindex.html" title="Python Module Index"
              >modules</a> |</li>
         <li class="right" >
-          <a href="random.html" title="Generating random coordinates"
+          <a href="dbio.html" title="Database IO"
              >next</a> |</li>
         <li class="right" >
           <a href="actdist.html" title="Activation distances calculation"

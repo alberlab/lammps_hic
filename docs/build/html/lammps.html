@@ -74,16 +74,16 @@ in the wrappers module.</p>
 <col class="field-body" />
 <tbody valign="top">
 <tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
-<dt><em>parallel_client (ipyparallel.Client instance)</em> </dt>
+<dt><em>parallel_client (ipyparallel.Client instance)</em></dt>
 <dd><p class="first last">The ipyparallel.Client instance to send the jobs to</p>
 </dd>
 <dt><em>old_prefix (string)</em></dt>
-<dd><p class="first last">The function will search for files named 
+<dd><p class="first last">The function will search for files named
 <em>old_prefix_&lt;n&gt;.hms</em> in the working directory, with <em>n</em>
 in the range 0, ..., <em>n_struct</em></p>
 </dd>
 <dt><em>new prefix (string)</em></dt>
-<dd><p class="first last">After minimization, <em>n_struct</em> new files 
+<dd><p class="first last">After minimization, <em>n_struct</em> new files
 named <em>new_prefix_&lt;n&gt;.hms</em> will be written to the
 working directory</p>
 </dd>
@@ -106,8 +106,8 @@ be found and written.</p>
 <dt><em>ignore_restart (bool)</em></dt>
 <dd><p class="first last">If set to True, the function will not check the
 presence of files named <em>new_prefix_&lt;n&gt;.hms</em>
-in the working directory. All the runs will be 
-re-sent and eventual files already present 
+in the working directory. All the runs will be
+re-sent and eventual files already present
 will be overwritten.</p>
 </dd>
 <dt><em>**kwargs</em></dt>
@@ -126,7 +126,7 @@ details</p>
 <dd><p class="first last">Number of structures with violations in this call</p>
 </dd>
 </dl>
-<p>Additionally, <em>now_completed</em> files 
+<p>Additionally, <em>now_completed</em> files
 named <em>new_prefix_&lt;n&gt;.hms</em>
 will be written in the <em>work_dir</em> directory.</p>
 </td>
@@ -145,9 +145,9 @@ fails, it will raise a RuntimeError.</p>
 <dd><p>Actual minimization wrapper.</p>
 <p>After creating the input and data files for lammps,
 runs the lammps executable in a process (using subprocess.Popen).</p>
-<p>This function is internally called by the higher level 
+<p>This function is internally called by the higher level
 parallel wrappers.</p>
-<p>When the program returns, it parses the output and returns the 
+<p>When the program returns, it parses the output and returns the
 results.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -165,14 +165,14 @@ results.</p>
 breaks are determined by changes in the chrom
 value</p>
 </dd>
-<dt><em>run_name (string)</em> </dt>
-<dd><p class="first last">Name of the run - determines only the name of temporary 
+<dt><em>run_name (string)</em></dt>
+<dd><p class="first last">Name of the run - determines only the name of temporary
 files.</p>
 </dd>
 <dt><em>tmp_files_dir (string)</em></dt>
-<dd><p class="first">Location of temporary files. Of course, it needs to be 
+<dd><p class="first">Location of temporary files. Of course, it needs to be
 writable.</p>
-<p>The default value, <strong>/dev/shm</strong> is usually a in-memory file 
+<p>The default value, <strong>/dev/shm</strong> is usually a in-memory file
 system, useful to share data between processes without
 actually writing to a physical disk.</p>
 <p class="last">The function checks for exceptions and try to remove
@@ -184,7 +184,7 @@ a walltime limit) some files could be left behind.</p>
 <dd><p class="first last">Deprecated, no effect at all.</p>
 </dd>
 <dt><em>check_violations (bool)</em></dt>
-<dd><p class="first last">Perform a check on the violations on the assigned 
+<dd><p class="first last">Perform a check on the violations on the assigned
 bonds. If set to <strong>False</strong>, the check is skipped
 and the violation output will be an empty list.</p>
 </dd>
@@ -246,15 +246,15 @@ the LAMMPS executable.</p>
 <dd><p class="first last">Radius of the nucleus in length units</p>
 </dd>
 <dt><em>occupancy (default=0.2)</em></dt>
-<dd><p class="first last">Occupancy defined as the fraction of total volume 
+<dd><p class="first last">Occupancy defined as the fraction of total volume
 occupied by the beads</p>
 </dd>
 <dt><em>actdist (default=None)</em></dt>
 <dd><p class="first">Filename or array of activation distances.
 Activation distances are a list of records,
-where each record contains:
-- index of first bead</p>
+where each record contains:</p>
 <ul class="last simple">
+<li>index of first bead</li>
 <li>index of second bead</li>
 <li>the desired contact probability</li>
 <li>the activation distance</li>
@@ -285,10 +285,10 @@ where each record contains:
 contact</p>
 </dd>
 <dt><em>fish_type (default=&#8221;rRpP&#8221;)</em></dt>
-<dd><p class="first">if fish is set, determines the kind of restraints to 
-impose. If the string contains:
-- <em>r</em>: impose minimum radial positions</p>
+<dd><p class="first">if fish is set, determines the kind of restraints to
+impose. If the string contains:</p>
 <ul class="last simple">
+<li><em>r</em>: impose minimum radial positions</li>
 <li><em>R</em>: impose maximum radial positions</li>
 <li><em>p</em>: impose minimum pairwise distances</li>
 <li><em>P</em>: impose maximum pairwise distances</li>
@@ -325,7 +325,7 @@ impose. If the string contains:
 <dd><p class="first last">Seed for the random number generator</p>
 </dd>
 <dt><em>write (default=None)</em></dt>
-<dd><p class="first last">If set, dumps the coordinates on the trajectory file 
+<dd><p class="first last">If set, dumps the coordinates on the trajectory file
 every <em>write</em> timesteps</p>
 </dd>
 <dt><em>thermo (default=1000)</em></dt>
@@ -345,7 +345,7 @@ every <em>thermo</em> timesteps</p>
 <dd><p class="first last">Maximum number of Conjugate Gradients iterations</p>
 </dd>
 <dt><em>max_cg_eval (default=500)</em></dt>
-<dd><p class="first last">Maximum number of energy evaluations during 
+<dd><p class="first last">Maximum number of energy evaluations during
 Conjugate Gradients</p>
 </dd>
 <dt><em>etol (default=1e-4)</em></dt>
@@ -356,13 +356,13 @@ Conjugate Gradients</p>
 </dd>
 <dt><em>territories (default=0)</em></dt>
 <dd><p class="first last">Deprecated.
-If larger than 0, select a bead every <em>territories</em> on each 
+If larger than 0, select a bead every <em>territories</em> on each
 chromosome, and constrain them to a short distance, to create
 chromosome territories</p>
 </dd>
 <dt><em>soft_min (default=0)</em></dt>
 <dd><p class="first">Deprecated.</p>
-<p class="last">All simulations now use a soft potential. It can be tuned 
+<p class="last">All simulations now use a soft potential. It can be tuned
 setting <em>evfactor</em></p>
 </dd>
 </dl>
@@ -379,7 +379,7 @@ setting <em>evfactor</em></p>
 <dt id="lammps_hic.lammps.DummyAtoms">
 <em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">DummyAtoms</code><span class="sig-paren">(</span><em>n_atoms</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#DummyAtoms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.DummyAtoms" title="Permalink to this definition">¶</a></dt>
 <dd><p>The dummy atoms class is used to keep track of dummy atoms.</p>
-<p>They are usually connected to multiple atoms (to enforce, 
+<p>They are usually connected to multiple atoms (to enforce,
 for example, some distance from the cell center).
 If we use
 the same atom for too many bonds, the dummy atom will set the
@@ -388,9 +388,9 @@ letting memory usage explode.</p>
 <p>The solution is to have multiple dummy atoms and
 use a single atom only for a limited number of
 bonds.</p>
-<p>DummyAtoms.next() returns the same dummy atom id for 
+<p>DummyAtoms.next() returns the same dummy atom id for
 <em>DummyAtom.max_bonds</em> (default is 10) times, then updates
-the number of dummy atoms, making the new atom the 
+the number of dummy atoms, making the new atom the
 current one.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -412,9 +412,64 @@ current one.</p>
 <dt id="lammps_hic.lammps.BondContainer">
 <em class="property">class </em><code class="descclassname">lammps_hic.lammps.</code><code class="descname">BondContainer</code><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer" title="Permalink to this definition">¶</a></dt>
 <dd><p>A container to avoid keeping track of ids and duplicates.
-The dictionary for the types is to avoid re-use of 
+The dictionary for the types is to avoid re-use of
 bond_types.</p>
 <p>This way, the check should be amortized O(1)</p>
+<dl class="method">
+<dt id="lammps_hic.lammps.BondContainer.add_bond">
+<code class="descname">add_bond</code><span class="sig-paren">(</span><em>bond_type</em>, <em>i</em>, <em>j</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer.add_bond"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer.add_bond" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add a bond of type <em>bond_type</em> between <em>i</em> and <em>j</em> beads</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first last docutils">
+<dt><em>bond_type</em></dt>
+<dd><p class="first last">A BondType instance returned by the add_type
+function</p>
+</dd>
+<dt><em>i, j</em></dt>
+<dd><p class="first last">Integer indexes of the two beads to be bound</p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="lammps_hic.lammps.BondContainer.add_type">
+<code class="descname">add_type</code><span class="sig-paren">(</span><em>type_str</em>, <em>kspring=0.0</em>, <em>r0=0.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer.add_type"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer.add_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add a bond type.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
+<dt><em>type_str</em></dt>
+<dd><p class="first last">Either &#8216;harmonic_upper_bound&#8217; or &#8216;harmonic_lower_bound&#8217;</p>
+</dd>
+<dt><em>kspring</em></dt>
+<dd><p class="first last">Spring constant</p>
+</dd>
+<dt><em>r0</em></dt>
+<dd><p class="first last">Activation distance (center to center)</p>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Outputs:</th><td class="field-body"><dl class="first last docutils">
+<dt><em>bt</em></dt>
+<dd><p class="first last">The corresponding BondType instance</p>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
 </dd></dl>
 
 </div>

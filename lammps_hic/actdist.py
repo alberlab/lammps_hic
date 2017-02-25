@@ -18,12 +18,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-__author__  = "Guido Polles"
-
-__license__ = "GPL"
-__version__ = "0.0.1"
-__email__   = "polles@usc.edu"
-
 import logging
 import numpy as np
 import scipy.sparse 
@@ -33,6 +27,12 @@ import time
 
 from .myio import read_hss, read_full_actdist
 from .util import monitor_progress, pretty_tdelta
+
+
+__author__  = "Guido Polles"
+__license__ = "GPL"
+__version__ = "0.0.1"
+__email__   = "polles@usc.edu"
 
 
 def _compute_actdist(data):
@@ -105,28 +105,19 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     '''
     Compute activation distances using ipyparallel. 
 
-    :Input parameters:
+    Arguments:
     
-        *parallel_client* 
-            an ipyparallel Client istance to send jobs
-        
-        *crd_fname*
-            an hss filename of the coordinates
-        
-        *probability_matrix*
-            the contact probability matrix
-        
-        *theta* 
-            work only on contacts with probability greater or equal to theta
-        
-        *last_ad*
-            the last activation distances. Either the filename or an iterable
-            with the activation distances of the last step, or None.
-        
-        *save_to*
-            file where to save the newly computed activation distances
-        
-        *scatter* 
+        parallel_client (ipyparallel.Client): an ipyparallel Client istance 
+            to send jobs
+        crd_fname (str): an hss filename of the coordinates
+        probability_matrix (str): the contact probability matrix file
+        theta (float): consider only contacts with probability greater or 
+            equal to theta
+        last_ad: last activation distances. Either the filename or an 
+            iterable with the activation distances of the last step, or None.
+        save_to (str): file where to save the newly computed activation 
+            distances
+        scatter 
             level of block subdivisions of the matrix. This function
             divide the needed computations into blocks before sending the request
             to parallel workers. It is a compromise between (i) sending coordinates for
@@ -144,18 +135,14 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
             the *linear* number of blocks, so scatter=10 means that the total
             number of blocks is ~100 times the number of workers.
 
-    :Returns:
-    
-        *new_ad* 
-            a numpy recarray with the newly computed activation distances
+    Returns:
+        numpy.recarray:
+            a numpy recarray with the newly computed activation distances. If
+            *save_to* is not None, the recarray will be dumped to the 
+            specified file 
 
-    :Exceptions:
-    
-        * If the parallel client has no registered workers, it raises 
-          a RuntimeError.
-        
-        * Does not catch any error coming from wrong parameters or 
-          input
+    Raises:
+        RuntimeError if the parallel client has no registered workers.
     '''
 
     # setup logger

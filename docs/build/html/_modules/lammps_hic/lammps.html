@@ -54,7 +54,7 @@
 <span class="c1"># Copyright (C) 2016 University of Southern California and</span>
 <span class="c1">#                        Guido Polles</span>
 <span class="c1"># </span>
-<span class="c1"># Authors: Guido Polles, Nan Hua</span>
+<span class="c1"># Authors: Guido Polles</span>
 <span class="c1"># </span>
 <span class="c1"># This program is free software: you can redistribute it and/or modify</span>
 <span class="c1"># it under the terms of the GNU General Public License as published by</span>
@@ -210,8 +210,24 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span> <span class="o">=</span> <span class="p">{}</span>
 
-    <span class="k">def</span> <span class="nf">add_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+<div class="viewcode-block" id="BondContainer.add_type"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer.add_type">[docs]</a>    <span class="k">def</span> <span class="nf">add_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Add a bond type.</span>
 
+<span class="sd">        :Arguments:</span>
+<span class="sd">            *type_str*</span>
+<span class="sd">                Either &#39;harmonic_upper_bound&#39; or &#39;harmonic_lower_bound&#39;</span>
+
+<span class="sd">            *kspring*</span>
+<span class="sd">                Spring constant</span>
+
+<span class="sd">            *r0*</span>
+<span class="sd">                Activation distance (center to center)</span>
+
+<span class="sd">        :Outputs:</span>
+<span class="sd">            *bt*</span>
+<span class="sd">                The corresponding BondType instance  </span>
+<span class="sd">        &#39;&#39;&#39;</span>
         <span class="n">bt</span> <span class="o">=</span> <span class="n">BondType</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">),</span>
                       <span class="n">type_str</span><span class="p">,</span>
                       <span class="n">kspring</span><span class="p">,</span>
@@ -223,15 +239,25 @@
             <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span><span class="p">[</span><span class="n">bt</span><span class="p">]</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">id</span>
             <span class="k">return</span> <span class="n">bt</span>
         <span class="k">else</span><span class="p">:</span> 
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">old_id</span><span class="p">]</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">old_id</span><span class="p">]</span></div>
 
-    <span class="k">def</span> <span class="nf">add_bond</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+<div class="viewcode-block" id="BondContainer.add_bond"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer.add_bond">[docs]</a>    <span class="k">def</span> <span class="nf">add_bond</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Add a bond of type *bond_type* between *i* and *j* beads</span>
+
+<span class="sd">        :Arguments:</span>
+<span class="sd">            *bond_type*</span>
+<span class="sd">                A BondType instance returned by the add_type </span>
+<span class="sd">                function</span>
+<span class="sd">            *i, j*</span>
+<span class="sd">                Integer indexes of the two beads to be bound</span>
+<span class="sd">        &#39;&#39;&#39;</span>
         <span class="n">bond</span> <span class="o">=</span> <span class="n">Bond</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="p">),</span>
                     <span class="n">bond_type</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
                     <span class="n">i</span><span class="p">,</span>
                     <span class="n">j</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bond</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">bond</span></div>
+        <span class="k">return</span> <span class="n">bond</span></div></div>
 
 
 <div class="viewcode-block" id="DummyAtoms"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.DummyAtoms">[docs]</a><span class="k">class</span> <span class="nc">DummyAtoms</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
@@ -321,6 +347,7 @@
 <span class="sd">            Filename or array of activation distances.</span>
 <span class="sd">            Activation distances are a list of records,</span>
 <span class="sd">            where each record contains:</span>
+
 <span class="sd">            - index of first bead</span>
 
 <span class="sd">            - index of second bead</span>
@@ -358,6 +385,7 @@
 <span class="sd">        *fish_type (default=&quot;rRpP&quot;)*</span>
 <span class="sd">            if fish is set, determines the kind of restraints to </span>
 <span class="sd">            impose. If the string contains:</span>
+
 <span class="sd">            - *r*: impose minimum radial positions</span>
 
 <span class="sd">            - *R*: impose maximum radial positions</span>
@@ -873,13 +901,13 @@
             <span class="k">if</span> <span class="n">d</span> <span class="o">&gt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
-                <span class="k">if</span> <span class="n">absv</span> <span class="o">&gt;</span> <span class="n">float_epsilon</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">relv</span> <span class="o">&gt;</span> <span class="mf">0.05</span><span class="p">:</span>
                     <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
         <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">d</span> <span class="o">&lt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
-                <span class="k">if</span> <span class="n">absv</span> <span class="o">&gt;</span> <span class="n">float_epsilon</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">relv</span> <span class="o">&gt;</span> <span class="mf">0.05</span><span class="p">:</span>
                     <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
     <span class="k">return</span> <span class="n">violations</span>
 
@@ -1334,7 +1362,7 @@
 <span class="sd">        If one or more of the minimizations</span>
 <span class="sd">        fails, it will raise a RuntimeError.</span>
 <span class="sd">    &#39;&#39;&#39;</span>
-    
+
     <span class="c1"># get the logger</span>
     <span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span>
 

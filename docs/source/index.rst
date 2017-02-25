@@ -14,6 +14,7 @@ Welcome to LammpsHiC's documentation!
    lammps
    actdist
    myio
+   dbio
    random
 
 

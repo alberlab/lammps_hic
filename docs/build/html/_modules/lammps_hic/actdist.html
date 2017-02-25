@@ -69,12 +69,6 @@
 <span class="c1"># You should have received a copy of the GNU General Public License</span>
 <span class="c1"># along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.</span>
 
-<span class="n">__author__</span>  <span class="o">=</span> <span class="s2">&quot;Guido Polles&quot;</span>
-
-<span class="n">__license__</span> <span class="o">=</span> <span class="s2">&quot;GPL&quot;</span>
-<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.1&quot;</span>
-<span class="n">__email__</span>   <span class="o">=</span> <span class="s2">&quot;polles@usc.edu&quot;</span>
-
 <span class="kn">import</span> <span class="nn">logging</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">scipy.sparse</span> 
@@ -84,6 +78,12 @@
 
 <span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">read_hss</span><span class="p">,</span> <span class="n">read_full_actdist</span>
 <span class="kn">from</span> <span class="nn">.util</span> <span class="k">import</span> <span class="n">monitor_progress</span><span class="p">,</span> <span class="n">pretty_tdelta</span>
+
+
+<span class="n">__author__</span>  <span class="o">=</span> <span class="s2">&quot;Guido Polles&quot;</span>
+<span class="n">__license__</span> <span class="o">=</span> <span class="s2">&quot;GPL&quot;</span>
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.1&quot;</span>
+<span class="n">__email__</span>   <span class="o">=</span> <span class="s2">&quot;polles@usc.edu&quot;</span>
 
 
 <span class="k">def</span> <span class="nf">_compute_actdist</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
@@ -156,28 +156,19 @@
     <span class="sd">&#39;&#39;&#39;</span>
 <span class="sd">    Compute activation distances using ipyparallel. </span>
 
-<span class="sd">    :Input parameters:</span>
+<span class="sd">    Arguments:</span>
 <span class="sd">    </span>
-<span class="sd">        *parallel_client* </span>
-<span class="sd">            an ipyparallel Client istance to send jobs</span>
-<span class="sd">        </span>
-<span class="sd">        *crd_fname*</span>
-<span class="sd">            an hss filename of the coordinates</span>
-<span class="sd">        </span>
-<span class="sd">        *probability_matrix*</span>
-<span class="sd">            the contact probability matrix</span>
-<span class="sd">        </span>
-<span class="sd">        *theta* </span>
-<span class="sd">            work only on contacts with probability greater or equal to theta</span>
-<span class="sd">        </span>
-<span class="sd">        *last_ad*</span>
-<span class="sd">            the last activation distances. Either the filename or an iterable</span>
-<span class="sd">            with the activation distances of the last step, or None.</span>
-<span class="sd">        </span>
-<span class="sd">        *save_to*</span>
-<span class="sd">            file where to save the newly computed activation distances</span>
-<span class="sd">        </span>
-<span class="sd">        *scatter* </span>
+<span class="sd">        parallel_client (ipyparallel.Client): an ipyparallel Client istance </span>
+<span class="sd">            to send jobs</span>
+<span class="sd">        crd_fname (str): an hss filename of the coordinates</span>
+<span class="sd">        probability_matrix (str): the contact probability matrix file</span>
+<span class="sd">        theta (float): consider only contacts with probability greater or </span>
+<span class="sd">            equal to theta</span>
+<span class="sd">        last_ad: last activation distances. Either the filename or an </span>
+<span class="sd">            iterable with the activation distances of the last step, or None.</span>
+<span class="sd">        save_to (str): file where to save the newly computed activation </span>
+<span class="sd">            distances</span>
+<span class="sd">        scatter </span>
 <span class="sd">            level of block subdivisions of the matrix. This function</span>
 <span class="sd">            divide the needed computations into blocks before sending the request</span>
 <span class="sd">            to parallel workers. It is a compromise between (i) sending coordinates for</span>
@@ -195,18 +186,14 @@
 <span class="sd">            the *linear* number of blocks, so scatter=10 means that the total</span>
 <span class="sd">            number of blocks is ~100 times the number of workers.</span>
 
-<span class="sd">    :Returns:</span>
-<span class="sd">    </span>
-<span class="sd">        *new_ad* </span>
-<span class="sd">            a numpy recarray with the newly computed activation distances</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        numpy.recarray:</span>
+<span class="sd">            a numpy recarray with the newly computed activation distances. If</span>
+<span class="sd">            *save_to* is not None, the recarray will be dumped to the </span>
+<span class="sd">            specified file </span>
 
-<span class="sd">    :Exceptions:</span>
-<span class="sd">    </span>
-<span class="sd">        * If the parallel client has no registered workers, it raises </span>
-<span class="sd">          a RuntimeError.</span>
-<span class="sd">        </span>
-<span class="sd">        * Does not catch any error coming from wrong parameters or </span>
-<span class="sd">          input</span>
+<span class="sd">    Raises:</span>
+<span class="sd">        RuntimeError if the parallel client has no registered workers.</span>
 <span class="sd">    &#39;&#39;&#39;</span>
 
     <span class="c1"># setup logger</span>

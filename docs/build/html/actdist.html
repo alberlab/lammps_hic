@@ -55,8 +55,11 @@
         <div class="bodywrapper">
           <div class="body" role="main">
             
-  <div class="section" id="module-lammps_hic.actdist">
-<span id="activation-distances-calculation"></span><h1>Activation distances calculation<a class="headerlink" href="#module-lammps_hic.actdist" title="Permalink to this headline">¶</a></h1>
+  <div class="section" id="activation-distances-calculation">
+<h1>Activation distances calculation<a class="headerlink" href="#activation-distances-calculation" title="Permalink to this headline">¶</a></h1>
+<p>This module provides a parallel interface to compute Activation Distances</p>
+<div class="section" id="module-lammps_hic.actdist">
+<span id="module-reference"></span><h2>Module reference<a class="headerlink" href="#module-lammps_hic.actdist" title="Permalink to this headline">¶</a></h2>
 <dl class="function">
 <dt id="lammps_hic.actdist.get_actdists">
 <code class="descclassname">lammps_hic.actdist.</code><code class="descname">get_actdists</code><span class="sig-paren">(</span><em>parallel_client</em>, <em>crd_fname</em>, <em>probability_matrix</em>, <em>theta</em>, <em>last_ad</em>, <em>save_to=None</em>, <em>scatter=3</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/actdist.html#get_actdists"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.actdist.get_actdists" title="Permalink to this definition">¶</a></dt>
@@ -65,67 +68,52 @@
 <col class="field-name" />
 <col class="field-body" />
 <tbody valign="top">
-<tr class="field-odd field"><th class="field-name" colspan="2">Input parameters:</th></tr>
-<tr class="field-odd field"><td>&nbsp;</td><td class="field-body"><dl class="first docutils">
-<dt><em>parallel_client</em> </dt>
-<dd><p class="first last">an ipyparallel Client istance to send jobs</p>
-</dd>
-<dt><em>crd_fname</em></dt>
-<dd><p class="first last">an hss filename of the coordinates</p>
-</dd>
-<dt><em>probability_matrix</em></dt>
-<dd><p class="first last">the contact probability matrix</p>
-</dd>
-<dt><em>theta</em> </dt>
-<dd><p class="first last">work only on contacts with probability greater or equal to theta</p>
-</dd>
-<dt><em>last_ad</em></dt>
-<dd><p class="first last">the last activation distances. Either the filename or an iterable
-with the activation distances of the last step, or None.</p>
-</dd>
-<dt><em>save_to</em></dt>
-<dd><p class="first last">file where to save the newly computed activation distances</p>
-</dd>
-<dt><em>scatter</em> </dt>
-<dd><p class="first last">level of block subdivisions of the matrix. This function
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>parallel_client</strong> (<em>ipyparallel.Client</em>) &#8211; an ipyparallel Client istance
+to send jobs</li>
+<li><strong>crd_fname</strong> (<em>str</em>) &#8211; an hss filename of the coordinates</li>
+<li><strong>probability_matrix</strong> (<em>str</em>) &#8211; the contact probability matrix file</li>
+<li><strong>theta</strong> (<em>float</em>) &#8211; consider only contacts with probability greater or
+equal to theta</li>
+<li><strong>last_ad</strong> &#8211; last activation distances. Either the filename or an
+iterable with the activation distances of the last step, or None.</li>
+<li><strong>save_to</strong> (<em>str</em>) &#8211; file where to save the newly computed activation
+distances</li>
+<li><strong>scatter</strong> &#8211; level of block subdivisions of the matrix. This function
 divide the needed computations into blocks before sending the request
 to parallel workers. It is a compromise between (i) sending coordinates for
-every i, j pair computation and (ii) sending all the coordinates to the workers. 
+every i, j pair computation and (ii) sending all the coordinates to the workers.
 Option (i) would require a lot of communication, while option
 (ii) would require a lot of memory on workers.
 Hence, i&#8217;s and j&#8217;s are subdivided into blocks and sent to the workers, toghether
-with the needed coordinates. Note that usually blocks on the diagonal 
+with the needed coordinates. Note that usually blocks on the diagonal
 have a ton more contacts, hence for load balancing purposes the total number of blocks
-should be larger than the number of workers. scatter=1 means that the 
+should be larger than the number of workers. scatter=1 means that the
 number of blocks is just big enough to have all workers receiving at
 least 1 job. Hence, blocks are big and the load is not really balanced.
 Higher values of scatter correspond to smaller blocks and better balancing
 at the cost of increased communication. Note that scatter increase
 the <em>linear</em> number of blocks, so scatter=10 means that the total
-number of blocks is ~100 times the number of workers.</p>
-</dd>
-</dl>
-</td>
-</tr>
-<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><dl class="first docutils">
-<dt><em>new_ad</em> </dt>
-<dd><p class="first last">a numpy recarray with the newly computed activation distances</p>
-</dd>
-</dl>
-</td>
-</tr>
-<tr class="field-odd field"><th class="field-name">Exceptions:</th><td class="field-body"><ul class="first last simple">
-<li>If the parallel client has no registered workers, it raises 
-a RuntimeError.</li>
-<li>Does not catch any error coming from wrong parameters or 
-input</li>
+number of blocks is ~100 times the number of workers.</li>
 </ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first">a numpy recarray with the newly computed activation distances. If
+<em>save_to</em> is not None, the recarray will be dumped to the
+specified file</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first">numpy.recarray</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Raises:</th><td class="field-body"><p class="first last">RuntimeError if the parallel client has no registered workers.</p>
 </td>
 </tr>
 </tbody>
 </table>
 </dd></dl>
 
+</div>
 </div>
 
 
@@ -134,6 +122,14 @@ input</li>
       </div>
       <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
         <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Activation distances calculation</a><ul>
+<li><a class="reference internal" href="#module-lammps_hic.actdist">Module reference</a></li>
+</ul>
+</li>
+</ul>
+
   <h4>Previous topic</h4>
   <p class="topless"><a href="lammps.html"
                         title="previous chapter">Interface to LAMMPS minimization</a></p>
