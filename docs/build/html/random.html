@@ -57,7 +57,7 @@
 of the initial coordinates</p>
 <dl class="function">
 <dt id="lammps_hic.random.create_random_population_with_territories">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_population_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>n_struct</em>, <em>prefix</em>, <em>ipp_client=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_population_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_population_with_territories" title="Permalink to this definition">¶</a></dt>
+<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_population_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>n_struct</em>, <em>prefix</em>, <em>ipp_client=None</em>, <em>dbfile=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_population_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_population_with_territories" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a population of N = <em>n_struct</em> structures, each on a single hms file.
 Each file path is determined as <em>&lt;prefix&gt;_&lt;n&gt;.hms</em>
 where <em>n</em> goes from 0 to N-1.</p>
@@ -68,35 +68,32 @@ around the centroid.</p>
 <col class="field-name" />
 <col class="field-body" />
 <tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first docutils">
-<dt><em>radii (iterable)</em></dt>
-<dd><p class="first last">A list containing the radius of each bead</p>
-</dd>
-<dt><em>chrom (iterable)</em></dt>
-<dd><p class="first last">A list of strings, one for each bead in the system,
-es: [&#8216;chr1&#8217;, &#8216;chr1&#8217;, ..., &#8216;chrY&#8217;]</p>
-</dd>
-<dt><em>n_struct</em></dt>
-<dd><p class="first last">Number of structures in the population</p>
-</dd>
-<dt><em>prefix</em></dt>
-<dd><p class="first last">Prefix of filenames. Es: if prefix=&#8217;tmp/territories&#8217;
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>radii</strong> (<em>iterable</em>) &#8211; A list containing the radius of each bead</li>
+<li><strong>chrom</strong> (<em>iterable</em>) &#8211; list of strings, one for each bead in the system,
+for example [&#8216;chr1&#8217;, &#8216;chr1&#8217;, ..., &#8216;chrY&#8217;]</li>
+<li><strong>n_struct</strong> (<em>int</em>) &#8211; Number of structures in the population</li>
+<li><strong>prefix</strong> (<em>str</em>) &#8211; Prefix of filenames: if prefix=&#8217;tmp/territories&#8217;
 the files tmp/territories_0.hms, tmp/territories_1.hms,
-etc. will be generated</p>
-</dd>
-<dt><em>ipp_client</em></dt>
-<dd><p class="first last">If None, will just produce serially the population.
+etc. will be generated</li>
+<li><strong>ipp_client</strong> (<em>ipyparallel.Client</em>) &#8211; If None, will just produce the
+population in a serial run.
 If set to a ipyparallel Client instance, will
 distribute the job to the workers. Requires
-cloudpickle.</p>
-</dd>
-</dl>
+cloudpickle.</li>
+<li><strong>dbfile</strong> (<em>str</em>) &#8211; If None, the function will write hms files.
+Else, will use the specified sqlite3 database file to
+write the coordinates</li>
+</ul>
 </td>
 </tr>
-<tr class="field-even field"><th class="field-name">Output:</th><td class="field-body"><p class="first">N files: <em>prefix_*.hms</em>, with * going from 0 to N-1</p>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first"><em>prefix_*.hms</em>, with * going from 0 to N-1</p>
 </td>
 </tr>
-<tr class="field-odd field"><th class="field-name">Exceptions:</th><td class="field-body"><p class="first last">No exceptions raised directly.</p>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first">N files</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Exceptions:</th><td class="field-body"><p class="first last">No exceptions raised directly.</p>
 </td>
 </tr>
 </tbody>
@@ -104,55 +101,122 @@ cloudpickle.</p>
 </dd></dl>
 
 <dl class="function">
-<dt id="lammps_hic.random.create_random_structure_with_territories">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_structure_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>prefix</em>, <em>i</em>, <em>R=5000.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_structure_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_structure_with_territories" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a single random structure with chromosome territories,
-and saves them to an hms file.</p>
+<dt id="lammps_hic.random.generate_territories">
+<code class="descclassname">lammps_hic.random.</code><code class="descname">generate_territories</code><span class="sig-paren">(</span><em>chrom</em>, <em>R=5000.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#generate_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.generate_territories" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a single random structure with chromosome territories.</p>
+<p>Each &#8220;territory&#8221; is a sphere with radius 0.75 times the average
+expected radius of a chromosome.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
 <col class="field-body" />
 <tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
-<li><strong>radii</strong> (<em>iterable</em>) &#8211; the radii of the beads, used only for creating
-the hms file.</li>
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
 <li><strong>chrom</strong> (<em>iterable</em>) &#8211; the chromosome tag for each bead. Note that
 chromosome start and end are detected as changes in the
 tag sequence</li>
-<li><strong>prefix</strong> (<em>str</em>) &#8211; prefix of the hms file name</li>
-<li><strong>i</strong> (<em>int</em>) &#8211; structure serial number</li>
 <li><strong>R</strong> (<em>float</em>) &#8211; radius of the cell</li>
 </ul>
 </td>
 </tr>
-</tbody>
-</table>
-<dl class="docutils">
-<dt>Outputs:</dt>
-<dd>&lt;prefix&gt;_&lt;i&gt;.hms</dd>
-</dl>
-<table class="docutils field-list" frame="void" rules="none">
-<col class="field-name" />
-<col class="field-body" />
-<tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">None</td>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first">structure coordinates</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first last">numpy.array</p>
+</td>
 </tr>
 </tbody>
 </table>
 </dd></dl>
 
 <dl class="function">
-<dt id="lammps_hic.random.get_random_coordinates">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">get_random_coordinates</code><span class="sig-paren">(</span><em>n_beads</em>, <em>n_struct</em>, <em>template_crds=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#get_random_coordinates"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.get_random_coordinates" title="Permalink to this definition">¶</a></dt>
-<dd><p>Create a set of random starting configuration by randomly
-assigning coordinates in a lattice inside the nuclear
-envelope. In this way we don&#8217;t face the situation where
-too many points are too close.</p>
+<dt id="lammps_hic.random.uniform">
+<code class="descclassname">lammps_hic.random.</code><code class="descname">uniform</code><span class="sig-paren">(</span><em>low=0.0</em>, <em>high=1.0</em>, <em>size=None</em><span class="sig-paren">)</span><a class="headerlink" href="#lammps_hic.random.uniform" title="Permalink to this definition">¶</a></dt>
+<dd><p>Draw samples from a uniform distribution.</p>
+<p>Samples are uniformly distributed over the half-open interval
+<code class="docutils literal"><span class="pre">[low,</span> <span class="pre">high)</span></code> (includes low, but excludes high).  In other words,
+any value within the given interval is equally likely to be drawn
+by <cite>uniform</cite>.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>low</strong> (<em>float</em><em>, </em><em>optional</em>) &#8211; Lower boundary of the output interval.  All values generated will be
+greater than or equal to low.  The default value is 0.</li>
+<li><strong>high</strong> (<em>float</em>) &#8211; Upper boundary of the output interval.  All values generated will be
+less than high.  The default value is 1.0.</li>
+<li><strong>size</strong> (<em>int</em><em> or </em><em>tuple of ints</em><em>, </em><em>optional</em>) &#8211; Output shape.  If the given shape is, e.g., <code class="docutils literal"><span class="pre">(m,</span> <span class="pre">n,</span> <span class="pre">k)</span></code>, then
+<code class="docutils literal"><span class="pre">m</span> <span class="pre">*</span> <span class="pre">n</span> <span class="pre">*</span> <span class="pre">k</span></code> samples are drawn.  Default is None, in which case a
+single value is returned.</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first"><strong>out</strong> &#8211; Drawn samples, with shape <cite>size</cite>.</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first last">ndarray</p>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition seealso">
+<p class="first admonition-title">See also</p>
+<dl class="last docutils">
+<dt><code class="xref py py-func docutils literal"><span class="pre">randint()</span></code></dt>
+<dd>Discrete uniform distribution, yielding integers.</dd>
+<dt><code class="xref py py-func docutils literal"><span class="pre">random_integers()</span></code></dt>
+<dd>Discrete uniform distribution over the closed interval <code class="docutils literal"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</dd>
+<dt><code class="xref py py-func docutils literal"><span class="pre">random_sample()</span></code></dt>
+<dd>Floats uniformly distributed over <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">1)</span></code>.</dd>
+<dt><code class="xref py py-func docutils literal"><span class="pre">random()</span></code></dt>
+<dd>Alias for <cite>random_sample</cite>.</dd>
+<dt><code class="xref py py-func docutils literal"><span class="pre">rand()</span></code></dt>
+<dd>Convenience function that accepts dimensions as input, e.g., <code class="docutils literal"><span class="pre">rand(2,2)</span></code> would generate a 2-by-2 array of floats, uniformly distributed over <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">1)</span></code>.</dd>
+</dl>
+</div>
+<p class="rubric">Notes</p>
+<p>The probability density function of the uniform distribution is</p>
+<div class="math">
+\[p(x) = \frac{1}{b - a}\]</div>
+<p>anywhere within the interval <code class="docutils literal"><span class="pre">[a,</span> <span class="pre">b)</span></code>, and zero elsewhere.</p>
+<p class="rubric">Examples</p>
+<p>Draw samples from the distribution:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">1000</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>All values are within the given interval:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">s</span> <span class="o">&gt;=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+<span class="go">True</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">s</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+<p>Display the histogram of the samples, along with the
+probability density function:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">count</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">ignored</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">bins</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">bins</span><span class="p">),</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
 </dd></dl>
 
 <dl class="function">
-<dt id="lammps_hic.random.prepare_random_template">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">prepare_random_template</code><span class="sig-paren">(</span><em>n_beads</em>, <em>nuclear_radius=5000.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#prepare_random_template"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.prepare_random_template" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a cubic grid of points inside the nuclear envelope.</p>
+<dt id="lammps_hic.random.uniform_sphere">
+<code class="descclassname">lammps_hic.random.</code><code class="descname">uniform_sphere</code><span class="sig-paren">(</span><em>R</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#uniform_sphere"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.uniform_sphere" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generates uniformly distributed points in a sphere</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>R</strong> (<em>float</em>) &#8211; radius of the sphere</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">triplet of coordinates x, y, z</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body">numpy.array</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 </div>

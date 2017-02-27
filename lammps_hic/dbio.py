@@ -105,7 +105,7 @@ class DBStructFile(object):
             raise ValueError('Invalid mode')
 
 
-    def add_iteration(self, iter_name):
+    def add_group(self, iter_name):
         '''
         Create a table to store coordinates, infos, and violations.
 

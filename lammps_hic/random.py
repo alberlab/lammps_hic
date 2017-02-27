@@ -24,13 +24,16 @@ of the initial coordinates
 '''
 
 from __future__ import print_function, division
-import numpy as np
+import numpy
+from numpy.random import uniform
 import logging
 from functools import partial
 import time
+from math import acos, sin, cos, pi
 
 from .myio import write_hms
 from .util import monitor_progress, pretty_tdelta
+from .dbio import DBStructFile
 
 
 __author__  = "Guido Polles"
@@ -39,46 +42,88 @@ __version__ = "0.0.1"
 __email__   = "polles@usc.edu"
 
 
+def uniform_sphere(R):
+    '''
+    Generates uniformly distributed points in a sphere
+    
+    Arguments:
+        R (float): radius of the sphere
 
-def prepare_random_template(n_beads, nuclear_radius=5000.0):
-    '''Creates a cubic grid of points inside the nuclear envelope.'''
-    n1d = (float(n_beads)/0.52)**(1.0/3.0)
-    a = (1.9 * nuclear_radius) / n1d  
-    grid = np.concatenate([np.arange(0, -nuclear_radius, -a), np.arange(a, nuclear_radius, a)])
-    crd = []
-    r2 = nuclear_radius**2
-    for x in grid:
-        for y in grid:
-            for z in grid:
-                if x*x+y*y+z*z > r2:
-                    continue
-                crd.append(np.array([x,y,z]))
-    return np.array(crd)
+    Returns:
+        numpy.array:
+            triplet of coordinates x, y, z 
+    '''
+    phi = uniform(0, 2 * pi)
+    costheta = uniform(-1, 1)
+    u = uniform(0, 1)
+
+    theta = acos( costheta )
+    r = R * ( u**(1./3.) )
+
+    x = r * sin( theta) * cos( phi )
+    y = r * sin( theta) * sin( phi )
+    z = r * cos( theta )
+
+    return numpy.array([x,y,z])
+
+
+def generate_territories(chrom, R=5000.0):
+    '''
+    Creates a single random structure with chromosome territories.
+
+    Each "territory" is a sphere with radius 0.75 times the average
+    expected radius of a chromosome.
+
+    Arguments:
+        chrom (iterable): the chromosome tag for each bead. Note that 
+            chromosome start and end are detected as changes in the 
+            tag sequence
+        R (float): radius of the cell
+    
+    Returns:
+        numpy.array:
+            structure coordinates
+    '''
+    
+    # chromosome ends are detected when
+    # the name is changed
+    if len(chrom) == 0: 
+        return None
+    n_chrom = 1
+    n_beads = [1]
+    n_tot = 1
+    for i in range(1, len(chrom)):
+        if chrom[i] != chrom[i-1]:
+            n_chrom += 1
+            n_beads.append(1)
+        else:
+            n_beads[-1] += 1
+        n_tot += 1
+
+    crds = numpy.empty((n_tot, 3))
+    # the radius of the chromosome is set as 75% of its
+    # "volumetric sphere" one. This is totally arbitrary. 
+    # Note: using float division of py3
+    chr_radii = [0.75 * R * (float(nb)/n_tot)**(1./3) for nb in n_beads]
+    crad = numpy.average(chr_radii)
+    k = 0
+    for i in range(n_chrom):    
+        center = uniform_sphere(R - crad)
+        for j in range(n_beads[i]):
+            crds[k] = uniform_sphere(crad) + center
+            k += 1
+
+    return crds
     
 
-def get_random_coordinates(n_beads, n_struct, template_crds=None):
+def _write_random_hms(radii, chrom, prefix, i, R=5000.0):
     '''
-    Create a set of random starting configuration by randomly 
-    assigning coordinates in a lattice inside the nuclear 
-    envelope. In this way we don't face the situation where
-    too many points are too close.
-    '''
-    if template_crds is None:
-        template_crds = prepare_random_template(n_beads)
-    crd = np.empty((n_struct, n_beads, 3))
-    for i in range(n_struct):
-        crd[i] = np.random.permutation(template_crds)[:n_beads]
-    return crd
-
-
-def create_random_structure_with_territories(radii, chrom, prefix, i, R=5000.0):
-    '''
-    Creates a single random structure with chromosome territories,
-    and saves them to an hms file.
+    Create a single hms file containing a random structure with
+    chromosome territories
 
     Arguments:
         radii (iterable): the radii of the beads, used only for creating 
-            the hms file.
+                the hms file.
         chrom (iterable): the chromosome tag for each bead. Note that 
             chromosome start and end are detected as changes in the 
             tag sequence
@@ -86,68 +131,22 @@ def create_random_structure_with_territories(radii, chrom, prefix, i, R=5000.0):
         i (int): structure serial number
         R (float): radius of the cell
 
-    Outputs:
-        <prefix>_<i>.hms
-    
     Returns:
-        None
+        The function creates a file <prefix>_<i>.hms and returns None
     '''
-    from math import acos, sin, cos, pi
-    from random import uniform
-    import numpy as np
-    
-    # generates uniformly distributed points in a sphere
-    def ransph(R):
-        phi = uniform(0, 2 * pi)
-        costheta = uniform(-1, 1)
-        u = uniform(0, 1)
-
-        theta = acos( costheta )
-        r = R * ( u**(1./3.) )
-
-        x = r * sin( theta) * cos( phi )
-        y = r * sin( theta) * sin( phi )
-        z = r * cos( theta )
-
-        return np.array([x,y,z])
-
-    # generate the coordinates
-    def gen_structure(chrom):
-        # chromosome ends are detected when
-        # the name is changed
-        if len(chrom) == 0: 
-            return None
-        n_chrom = 1
-        n_beads = [1]
-        n_tot = 1
-        for i in range(1, len(chrom)):
-            if chrom[i] != chrom[i-1]:
-                n_chrom += 1
-                n_beads.append(1)
-            else:
-                n_beads[-1] += 1
-            n_tot += 1
-
-        crds = np.empty((n_tot, 3))
-        # the radius of the chromosome is set as 75% of its
-        # "volumetric sphere" one. This is totally arbitrary. 
-        # Note: using float division of py3
-        chr_radii = [0.75 * R * (nb/n_tot)**(1./3) for nb in n_beads]
-        crad = np.average(chr_radii)
-        k = 0
-        for i in range(n_chrom):    
-            center = ransph(R - crad)
-            for j in range(n_beads[i]):
-                crds[k] = ransph(crad) + center
-                k += 1
-        return crds
-
     fname = '%s_%d.hms' % (prefix, i)
-    crd = gen_structure(chrom)
+    crd = generate_territories(chrom, R=R)
     write_hms(fname, crd, radii, chrom)
 
 
-def create_random_population_with_territories(radii, chrom, n_struct, prefix, ipp_client=None):
+def _write_random_to_db(dbname, chrom, prefix, i, R=5000):
+    from lammps_hic.dbio import DBStructFile
+    crd = generate_territories(chrom, R=R)
+    f = DBStructFile(dbname)
+    f.write_structure(prefix, i, crd)
+
+
+def create_random_population_with_territories(radii, chrom, n_struct, prefix, ipp_client=None, dbfile=None):
     '''
     Creates a population of N = *n_struct* structures, each on a single hms file. 
     Each file path is determined as *<prefix>_<n>.hms* 
@@ -157,30 +156,24 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
     centroids, and positioning chromosome beads in a spherical volume 
     around the centroid.
     
-    :Arguments:
-        
-        *radii (iterable)*
-            A list containing the radius of each bead
-    
-        *chrom (iterable)*
-            A list of strings, one for each bead in the system,
-            es: ['chr1', 'chr1', ..., 'chrY']
-    
-        *n_struct*
-            Number of structures in the population
-
-        *prefix*
-            Prefix of filenames. Es: if prefix='tmp/territories'
+    Arguments:        
+        radii (iterable): A list containing the radius of each bead
+        chrom (iterable): list of strings, one for each bead in the system,
+            for example ['chr1', 'chr1', ..., 'chrY']
+        n_struct (int): Number of structures in the population
+        prefix (str): Prefix of filenames: if prefix='tmp/territories'
             the files tmp/territories_0.hms, tmp/territories_1.hms, 
             etc. will be generated
-
-        *ipp_client*
-            If None, will just produce serially the population.
+        ipp_client (ipyparallel.Client): If None, will just produce the 
+            population in a serial run.
             If set to a ipyparallel Client instance, will 
             distribute the job to the workers. Requires 
             cloudpickle. 
+        dbfile (str): If None, the function will write hms files.
+            Else, will use the specified sqlite3 database file to 
+            write the coordinates
 
-    :Output:
+    Returns:
         N files: *prefix_\*.hms*, with * going from 0 to N-1
 
     :Exceptions:
@@ -188,26 +181,37 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
     '''
     logger = logging.getLogger(__name__)
 
+    if dbfile is not None:
+        f = DBStructFile(dbfile, n_struct=n_struct, radii=radii,
+                         chrom=chrom)
+        f.add_group(prefix)
+        genfunc = partial(_write_random_to_db, dbfile, chrom, prefix)
+    else:
+        genfunc = partial(_write_random_hms, radii, chrom, prefix)
+
+
     if ipp_client is None:
+        # serial run
         start = time.time()
-        logger.info('create_random_population_with_territories(): serial run started.')
+        logger.info('create_random_population_with_territories():'
+                    ' serial run started (%d structures)', n_struct)
         for i in range(n_struct):
-            create_random_structure_with_territories(radii, chrom, prefix, i)
+            genfunc(i)
         end = time.time()
-        logger.info('create_random_population_with_territories(): serial run done. (timing: %s)', 
+        logger.info('create_random_population_with_territories():'
+                    ' serial run done. (timing: %s)', 
                     pretty_tdelta(end-start))
     else:        
-        # create a closure to map to remote engines
-        func = partial(create_random_structure_with_territories, radii, chrom, prefix)
-        
-        # cloudpickle is needed to send closures
+        # cloudpickle is needed to send the partials
         ipp_client[:].use_cloudpickle() 
-        logger.info('create_random_population_with_territories(): parallel run started on %d workers',
+        logger.info('create_random_population_with_territories():'
+                    ' parallel run started on %d workers',
                     len(ipp_client))
 
-        ar = ipp_client[:].map_async(func, range(n_struct))
+        ar = ipp_client[:].map_async(genfunc, range(n_struct))
 
         monitor_progress('create_random_population_with_territories()', ar)
 
-        logger.info('create_random_population_with_territories(): parallel run finished. (Total time: %s)',
+        logger.info('create_random_population_with_territories():'
+                    ' parallel run finished. (Total time: %s)',
                     pretty_tdelta(ar.wall_time))
