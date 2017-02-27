@@ -1,10 +1,43 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2016 University of Southern California and
+#                        Guido Polles
+# 
+# Authors: Guido Polles
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+'''
+The *random* module provides functions for the generation
+of the initial coordinates
+'''
+
+from __future__ import print_function, division
 import numpy as np
 import logging
 from functools import partial
+import time
 
 from .myio import write_hms
 from .util import monitor_progress, pretty_tdelta
-import time
+
+
+__author__  = "Guido Polles"
+__license__ = "GPL"
+__version__ = "0.0.1"
+__email__   = "polles@usc.edu"
+
 
 
 def prepare_random_template(n_beads, nuclear_radius=5000.0):
@@ -38,7 +71,27 @@ def get_random_coordinates(n_beads, n_struct, template_crds=None):
     return crd
 
 
-def _create_random_structure_with_territories(radii, chrom, prefix, i, R=5000.0):
+def create_random_structure_with_territories(radii, chrom, prefix, i, R=5000.0):
+    '''
+    Creates a single random structure with chromosome territories,
+    and saves them to an hms file.
+
+    Arguments:
+        radii (iterable): the radii of the beads, used only for creating 
+            the hms file.
+        chrom (iterable): the chromosome tag for each bead. Note that 
+            chromosome start and end are detected as changes in the 
+            tag sequence
+        prefix (str): prefix of the hms file name
+        i (int): structure serial number
+        R (float): radius of the cell
+
+    Outputs:
+        <prefix>_<i>.hms
+    
+    Returns:
+        None
+    '''
     from math import acos, sin, cos, pi
     from random import uniform
     import numpy as np
@@ -76,16 +129,17 @@ def _create_random_structure_with_territories(radii, chrom, prefix, i, R=5000.0)
             n_tot += 1
 
         crds = np.empty((n_tot, 3))
+        # the radius of the chromosome is set as 75% of its
+        # "volumetric sphere" one. This is totally arbitrary. 
+        # Note: using float division of py3
+        chr_radii = [0.75 * R * (nb/n_tot)**(1./3) for nb in n_beads]
+        crad = np.average(chr_radii)
         k = 0
-        for i in range(n_chrom):
-            # the radius of the chromosome is set as 75% of its
-            # "volumetric sphere" one. This is totally arbitrary. 
-            crad = 0.75 * R * (float(n_beads[i])/n_tot)**(1./3.)
+        for i in range(n_chrom):    
             center = ransph(R - crad)
             for j in range(n_beads[i]):
                 crds[k] = ransph(crad) + center
                 k += 1
-
         return crds
 
     fname = '%s_%d.hms' % (prefix, i)
@@ -138,13 +192,13 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
         start = time.time()
         logger.info('create_random_population_with_territories(): serial run started.')
         for i in range(n_struct):
-            _create_random_structure_with_territories(radii, chrom, prefix, i)
+            create_random_structure_with_territories(radii, chrom, prefix, i)
         end = time.time()
         logger.info('create_random_population_with_territories(): serial run done. (timing: %s)', 
                     pretty_tdelta(end-start))
     else:        
         # create a closure to map to remote engines
-        func = partial(_create_random_structure_with_territories, radii, chrom, prefix)
+        func = partial(create_random_structure_with_territories, radii, chrom, prefix)
         
         # cloudpickle is needed to send closures
         ipp_client[:].use_cloudpickle() 

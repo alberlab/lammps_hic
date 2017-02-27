@@ -49,13 +49,46 @@
           <div class="body" role="main">
             
   <h1>Source code for lammps_hic.random</h1><div class="highlight"><pre>
-<span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span></span><span class="ch">#!/usr/bin/env python</span>
+
+<span class="c1"># Copyright (C) 2016 University of Southern California and</span>
+<span class="c1">#                        Guido Polles</span>
+<span class="c1"># </span>
+<span class="c1"># Authors: Guido Polles</span>
+<span class="c1"># </span>
+<span class="c1"># This program is free software: you can redistribute it and/or modify</span>
+<span class="c1"># it under the terms of the GNU General Public License as published by</span>
+<span class="c1"># the Free Software Foundation, either version 3 of the License, or</span>
+<span class="c1"># (at your option) any later version.</span>
+<span class="c1"># </span>
+<span class="c1"># This program is distributed in the hope that it will be useful,</span>
+<span class="c1"># but WITHOUT ANY WARRANTY; without even the implied warranty of</span>
+<span class="c1"># MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the</span>
+<span class="c1"># GNU General Public License for more details.</span>
+<span class="c1"># </span>
+<span class="c1"># You should have received a copy of the GNU General Public License</span>
+<span class="c1"># along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.</span>
+
+<span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">The *random* module provides functions for the generation</span>
+<span class="sd">of the initial coordinates</span>
+<span class="sd">&#39;&#39;&#39;</span>
+
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">logging</span>
 <span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">time</span>
 
 <span class="kn">from</span> <span class="nn">.myio</span> <span class="k">import</span> <span class="n">write_hms</span>
 <span class="kn">from</span> <span class="nn">.util</span> <span class="k">import</span> <span class="n">monitor_progress</span><span class="p">,</span> <span class="n">pretty_tdelta</span>
-<span class="kn">import</span> <span class="nn">time</span>
+
+
+<span class="n">__author__</span>  <span class="o">=</span> <span class="s2">&quot;Guido Polles&quot;</span>
+<span class="n">__license__</span> <span class="o">=</span> <span class="s2">&quot;GPL&quot;</span>
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.0.1&quot;</span>
+<span class="n">__email__</span>   <span class="o">=</span> <span class="s2">&quot;polles@usc.edu&quot;</span>
+
 
 
 <div class="viewcode-block" id="prepare_random_template"><a class="viewcode-back" href="../../random.html#lammps_hic.random.prepare_random_template">[docs]</a><span class="k">def</span> <span class="nf">prepare_random_template</span><span class="p">(</span><span class="n">n_beads</span><span class="p">,</span> <span class="n">nuclear_radius</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
@@ -89,7 +122,27 @@
     <span class="k">return</span> <span class="n">crd</span></div>
 
 
-<span class="k">def</span> <span class="nf">_create_random_structure_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
+<div class="viewcode-block" id="create_random_structure_with_territories"><a class="viewcode-back" href="../../random.html#lammps_hic.random.create_random_structure_with_territories">[docs]</a><span class="k">def</span> <span class="nf">create_random_structure_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
+    <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Creates a single random structure with chromosome territories,</span>
+<span class="sd">    and saves them to an hms file.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        radii (iterable): the radii of the beads, used only for creating </span>
+<span class="sd">            the hms file.</span>
+<span class="sd">        chrom (iterable): the chromosome tag for each bead. Note that </span>
+<span class="sd">            chromosome start and end are detected as changes in the </span>
+<span class="sd">            tag sequence</span>
+<span class="sd">        prefix (str): prefix of the hms file name</span>
+<span class="sd">        i (int): structure serial number</span>
+<span class="sd">        R (float): radius of the cell</span>
+
+<span class="sd">    Outputs:</span>
+<span class="sd">        &lt;prefix&gt;_&lt;i&gt;.hms</span>
+<span class="sd">    </span>
+<span class="sd">    Returns:</span>
+<span class="sd">        None</span>
+<span class="sd">    &#39;&#39;&#39;</span>
     <span class="kn">from</span> <span class="nn">math</span> <span class="k">import</span> <span class="n">acos</span><span class="p">,</span> <span class="n">sin</span><span class="p">,</span> <span class="n">cos</span><span class="p">,</span> <span class="n">pi</span>
     <span class="kn">from</span> <span class="nn">random</span> <span class="k">import</span> <span class="n">uniform</span>
     <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
@@ -127,21 +180,22 @@
             <span class="n">n_tot</span> <span class="o">+=</span> <span class="mi">1</span>
 
         <span class="n">crds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="n">n_tot</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+        <span class="c1"># the radius of the chromosome is set as 75% of its</span>
+        <span class="c1"># &quot;volumetric sphere&quot; one. This is totally arbitrary. </span>
+        <span class="c1"># Note: using float division of py3</span>
+        <span class="n">chr_radii</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.75</span> <span class="o">*</span> <span class="n">R</span> <span class="o">*</span> <span class="p">(</span><span class="n">nb</span><span class="o">/</span><span class="n">n_tot</span><span class="p">)</span><span class="o">**</span><span class="p">(</span><span class="mf">1.</span><span class="o">/</span><span class="mi">3</span><span class="p">)</span> <span class="k">for</span> <span class="n">nb</span> <span class="ow">in</span> <span class="n">n_beads</span><span class="p">]</span>
+        <span class="n">crad</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">average</span><span class="p">(</span><span class="n">chr_radii</span><span class="p">)</span>
         <span class="n">k</span> <span class="o">=</span> <span class="mi">0</span>
-        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_chrom</span><span class="p">):</span>
-            <span class="c1"># the radius of the chromosome is set as 75% of its</span>
-            <span class="c1"># &quot;volumetric sphere&quot; one. This is totally arbitrary. </span>
-            <span class="n">crad</span> <span class="o">=</span> <span class="mf">0.75</span> <span class="o">*</span> <span class="n">R</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">n_beads</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="o">/</span><span class="n">n_tot</span><span class="p">)</span><span class="o">**</span><span class="p">(</span><span class="mf">1.</span><span class="o">/</span><span class="mf">3.</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_chrom</span><span class="p">):</span>    
             <span class="n">center</span> <span class="o">=</span> <span class="n">ransph</span><span class="p">(</span><span class="n">R</span> <span class="o">-</span> <span class="n">crad</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_beads</span><span class="p">[</span><span class="n">i</span><span class="p">]):</span>
                 <span class="n">crds</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">ransph</span><span class="p">(</span><span class="n">crad</span><span class="p">)</span> <span class="o">+</span> <span class="n">center</span>
                 <span class="n">k</span> <span class="o">+=</span> <span class="mi">1</span>
-
         <span class="k">return</span> <span class="n">crds</span>
 
     <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">_</span><span class="si">%d</span><span class="s1">.hms&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
     <span class="n">crd</span> <span class="o">=</span> <span class="n">gen_structure</span><span class="p">(</span><span class="n">chrom</span><span class="p">)</span>
-    <span class="n">write_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">)</span>
+    <span class="n">write_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">)</span></div>
 
 
 <div class="viewcode-block" id="create_random_population_with_territories"><a class="viewcode-back" href="../../random.html#lammps_hic.random.create_random_population_with_territories">[docs]</a><span class="k">def</span> <span class="nf">create_random_population_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">ipp_client</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
@@ -189,13 +243,13 @@
         <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;create_random_population_with_territories(): serial run started.&#39;</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_struct</span><span class="p">):</span>
-            <span class="n">_create_random_structure_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+            <span class="n">create_random_structure_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
         <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;create_random_population_with_territories(): serial run done. (timing: </span><span class="si">%s</span><span class="s1">)&#39;</span><span class="p">,</span> 
                     <span class="n">pretty_tdelta</span><span class="p">(</span><span class="n">end</span><span class="o">-</span><span class="n">start</span><span class="p">))</span>
     <span class="k">else</span><span class="p">:</span>        
         <span class="c1"># create a closure to map to remote engines</span>
-        <span class="n">func</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">_create_random_structure_with_territories</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">)</span>
+        <span class="n">func</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">create_random_structure_with_territories</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">)</span>
         
         <span class="c1"># cloudpickle is needed to send closures</span>
         <span class="n">ipp_client</span><span class="p">[:]</span><span class="o">.</span><span class="n">use_cloudpickle</span><span class="p">()</span> 

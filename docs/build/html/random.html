@@ -53,6 +53,8 @@
             
   <div class="section" id="module-lammps_hic.random">
 <span id="generating-random-coordinates"></span><h1>Generating random coordinates<a class="headerlink" href="#module-lammps_hic.random" title="Permalink to this headline">¶</a></h1>
+<p>The <em>random</em> module provides functions for the generation
+of the initial coordinates</p>
 <dl class="function">
 <dt id="lammps_hic.random.create_random_population_with_territories">
 <code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_population_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>n_struct</em>, <em>prefix</em>, <em>ipp_client=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_population_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_population_with_territories" title="Permalink to this definition">¶</a></dt>
@@ -96,6 +98,43 @@ cloudpickle.</p>
 </tr>
 <tr class="field-odd field"><th class="field-name">Exceptions:</th><td class="field-body"><p class="first last">No exceptions raised directly.</p>
 </td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="lammps_hic.random.create_random_structure_with_territories">
+<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_structure_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>prefix</em>, <em>i</em>, <em>R=5000.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_structure_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_structure_with_territories" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a single random structure with chromosome territories,
+and saves them to an hms file.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>radii</strong> (<em>iterable</em>) &#8211; the radii of the beads, used only for creating
+the hms file.</li>
+<li><strong>chrom</strong> (<em>iterable</em>) &#8211; the chromosome tag for each bead. Note that
+chromosome start and end are detected as changes in the
+tag sequence</li>
+<li><strong>prefix</strong> (<em>str</em>) &#8211; prefix of the hms file name</li>
+<li><strong>i</strong> (<em>int</em>) &#8211; structure serial number</li>
+<li><strong>R</strong> (<em>float</em>) &#8211; radius of the cell</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+<dl class="docutils">
+<dt>Outputs:</dt>
+<dd>&lt;prefix&gt;_&lt;i&gt;.hms</dd>
+</dl>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">None</td>
 </tr>
 </tbody>
 </table>
