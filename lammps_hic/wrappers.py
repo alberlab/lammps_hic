@@ -179,10 +179,11 @@ class ActivationDistancesProcess(multiprocessing.Process):
         super(ActivationDistancesProcess, self).__init__()
         self.queue = queue
         self.from_label = kwargs.pop('from_label')
-        self.to_label = kwargs.pop('to_label')
+        self.to_label = kwargs.pop('to_label') 
         self.theta = kwargs.pop('theta')
         self.matrix = kwargs.pop('matrix')
         self.scatter = kwargs.pop('scatter')
+        self.first_iteration = kwargs.pop('first_iteration')
 
     def _process(self):
         '''
@@ -195,11 +196,15 @@ class ActivationDistancesProcess(multiprocessing.Process):
         try:
             rcl = Client(context=zmq.Context())  # Using a fresh context!
             from lammps_hic.actdist import get_actdists
+            if self.first_iteration:
+                last_ad = None
+            else:
+                last_ad = 'ActDist/%s.actDist' % self.from_label
             ad = get_actdists(rcl,
                              './structures/%s.hss' % self.from_label,
                              self.matrix,
                              theta=self.theta,
-                             last_ad='ActDist/%s.actDist' % self.from_label,
+                             last_ad=last_ad,
                              save_to='ActDist/%s.actDist' % self.to_label,
                              scatter=self.scatter)
 
@@ -264,13 +269,14 @@ class ActivationDistancesStep(object):
     and *n_ad* is set to the number of records in the activation
     distances file.
     '''
-    def __init__(self, from_label, to_label, matrix, theta, scatter=10):
+    def __init__(self, from_label, to_label, matrix, theta, first_iteration=False, scatter=10):
         self.queue = multiprocessing.Queue()
         self.proc = ActivationDistancesProcess(queue=self.queue,
                                                from_label=from_label,
                                                to_label=to_label,
                                                matrix=matrix,
                                                theta=theta,
+                                               first_iteration=first_iteration,
                                                scatter=scatter)
         self.results = None
         self.n_ad = None

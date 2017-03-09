@@ -19,13 +19,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
-The *random* module provides functions for the generation
+The **random** module provides functions for the generation
 of the initial coordinates
 '''
 
 from __future__ import print_function, division
 import numpy
-from numpy.random import uniform
+import numpy.random
 import logging
 from functools import partial
 import time
@@ -53,9 +53,9 @@ def uniform_sphere(R):
         numpy.array:
             triplet of coordinates x, y, z 
     '''
-    phi = uniform(0, 2 * pi)
-    costheta = uniform(-1, 1)
-    u = uniform(0, 1)
+    phi = numpy.random.uniform(0, 2 * pi)
+    costheta = numpy.random.uniform(-1, 1)
+    u = numpy.random.uniform(0, 1)
 
     theta = acos( costheta )
     r = R * ( u**(1./3.) )
@@ -117,36 +117,30 @@ def generate_territories(chrom, R=5000.0):
     
 
 def _write_random_hms(radii, chrom, prefix, i, R=5000.0):
-    '''
-    Create a single hms file containing a random structure with
-    chromosome territories
-
-    Arguments:
-        radii (iterable): the radii of the beads, used only for creating 
-                the hms file.
-        chrom (iterable): the chromosome tag for each bead. Note that 
-            chromosome start and end are detected as changes in the 
-            tag sequence
-        prefix (str): prefix of the hms file name
-        i (int): structure serial number
-        R (float): radius of the cell
-
-    Returns:
-        The function creates a file <prefix>_<i>.hms and returns None
-    '''
     fname = '%s_%d.hms' % (prefix, i)
     crd = generate_territories(chrom, R=R)
     write_hms(fname, crd, radii, chrom)
 
 
-def _write_random_to_db(dbname, chrom, prefix, i, R=5000):
+def _write_random_to_db(dbname, chrom, prefix, i, R=5000.0):
     from lammps_hic.dbio import DBStructFile
     crd = generate_territories(chrom, R=R)
-    f = DBStructFile(dbname)
+    f = DBStructFile(dbname, 'r')
     f.write_structure(prefix, i, crd)
 
 
-def create_random_population_with_territories(radii, chrom, n_struct, prefix, ipp_client=None, dbfile=None):
+def _write_random_to_memmap(fname, chrom, i, R=5000.0):
+    n_beads = len(chrom)
+    crd = generate_territories(chrom, R=R)
+    # assumes 4 bytes floating point
+    offset = n_beads*3*4*i
+    f = numpy.memmap(fname, mode='r+', dtype='float32', shape=(n_beads, 3), 
+                     offset=offset)
+    f[:] = crd[:]
+    f.flush()
+
+
+def create_random_population_with_territories(radii, chrom, n_struct, prefix, ipp_client=None, dbfile=None, memmap=None):
     '''
     Creates a population of N = *n_struct* structures, each on a single hms file. 
     Each file path is determined as *<prefix>_<n>.hms* 
@@ -172,6 +166,8 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
         dbfile (str): If None, the function will write hms files.
             Else, will use the specified sqlite3 database file to 
             write the coordinates
+        memmap (str): If not None, coordinates will be written
+            to a numpy memmap instead of a hms or sqlite db.
 
     Returns:
         N files: *prefix_\*.hms*, with * going from 0 to N-1
@@ -186,6 +182,11 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
                          chrom=chrom)
         f.add_group(prefix)
         genfunc = partial(_write_random_to_db, dbfile, chrom, prefix)
+    elif memmap is not None:
+        # create and close memmap
+        f = numpy.memmap(memmap, mode='w+', dtype='float32', 
+                         shape=(n_struct, len(chrom), 3))
+        genfunc = partial(_write_random_to_memmap, memmap, chrom)
     else:
         genfunc = partial(_write_random_hms, radii, chrom, prefix)
 

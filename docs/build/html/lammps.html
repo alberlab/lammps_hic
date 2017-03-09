@@ -365,6 +365,18 @@ chromosome territories</p>
 <p class="last">All simulations now use a soft potential. It can be tuned
 setting <em>evfactor</em></p>
 </dd>
+<dt><em>ev_step (default=0)</em></dt>
+<dd><p class="first last">If an integer different from 0, the excluded volume interactions
+will be scaled linearly from <em>ev_start</em> to <em>ev_stop</em> during the
+simulation. The value of the scale parameter will be updated
+every <em>ev_step</em> timesteps.</p>
+</dd>
+<dt><em>ev_start (default 0.0)</em></dt>
+<dd><p class="first last">See <em>ev_step</em></p>
+</dd>
+<dt><em>ev_stop (default 0.0)</em></dt>
+<dd><p class="first last">See <em>ev_step</em></p>
+</dd>
 </dl>
 </td>
 </tr>

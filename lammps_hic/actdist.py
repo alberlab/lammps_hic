@@ -162,7 +162,9 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     if last_ad is None:
         last_ad = []
     elif isinstance(last_ad, str) or isinstance(last_ad, unicode):
-        last_ad = read_full_actdist(last_ad)   
+        last_ad = read_full_actdist(last_ad)
+
+    # read coordinates from hss  
     start = time.time() 
     crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
     n_loci = probability_matrix.shape[0]
@@ -211,7 +213,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
         for bj in range(bi, blocks_per_line):
             if len(blocks[(bi, bj)]) > 0:
                 args.append([local_data[bi], local_data[bj], radii, blocks[(bi, bj)], n_struct])
-                logger.debug('get_actdist(): block: %d %d n: %d', bi, bj, len(blocks[(bi, bj)]))
+                # logger.debug('get_actdist(): block: %d %d n: %d', bi, bj, len(blocks[(bi, bj)]))
     end = time.time()
     logger.debug('get_actdist(): timing for data distribution: %f', end-start)
     

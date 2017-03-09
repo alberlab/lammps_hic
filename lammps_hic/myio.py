@@ -89,17 +89,14 @@ def write_actdist():
 
 def read_hss(fname, i=None):
     '''
-    Reads all information in an hss file:
+    Reads all information in an hss file
 
-    - crd (numpy.ndarray(dtype='f4')): population coordinates
-
-    - radii (numpy.ndarray(dtype='f4')): bead radii
-
-    - chrom (numpy.ndarray(dtype=str)): chromosome tags
-
-    - n_struct (int): number of structures
-
-    - n_bead (int): number of beads in one structure
+    Returns:
+        crd (numpy.ndarray(dtype='f4')): population coordinates
+        radii (numpy.ndarray(dtype='f4')): bead radii
+        chrom (numpy.ndarray(dtype=str)): chromosome tags
+        n_struct (int): number of structures
+        n_bead (int): number of beads in one structure
     '''
     with h5py.File(fname, 'r') as f:
         if i is None:
@@ -172,6 +169,27 @@ def remove_hms(prefix, n_struct):
         fname = '{}_{}.hms'.format(prefix, i)
         if os.path.isfile(fname):
             os.remove(fname)
+
+
+def dump_violations(file, violations, structure_index):
+    if len(violations) > 0:
+        print('STRUCTURE:', structure_index, file=file)
+        for v in violations:
+            print(v['bt'], ':', v['i'], v['j'], v['absv'], v['relv'], file=file)
+
+
+def dump_info_header(file, info):
+    print('# structure', file=file, end='  ')
+    for k in info.keys():
+        print(str(k), file=file, end='  ')
+    print('', file=file)
+
+
+def dump_info(file, info, structure_index):
+    print(structure_index, file=file, end='  ')
+    for k, v in info.items():
+        print(v, file=file, end='  ')
+    print('', file=file)
 
 
 def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_after=False):
@@ -252,7 +270,6 @@ def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_afte
             os.remove(hss)
         raise
     
-
 
 
 

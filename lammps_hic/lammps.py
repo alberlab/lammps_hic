@@ -90,7 +90,10 @@ ARG_DEFAULT = {
     'etol': 1e-4,
     'ftol': 1e-6,
     'territories': 0,
-    'soft_min': 0
+    'soft_min': 0,
+    'ev_start': 0.0,
+    'ev_stop': 0.0,
+    'ev_step': 0,
 }
 
 
@@ -414,6 +417,18 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
             
             All simulations now use a soft potential. It can be tuned 
             setting *evfactor*
+
+        *ev_step (default=0)*
+            If an integer different from 0, the excluded volume interactions
+            will be scaled linearly from *ev_start* to *ev_stop* during the
+            simulation. The value of the scale parameter will be updated 
+            every *ev_step* timesteps.
+
+        *ev_start (default 0.0)*
+            See *ev_step*
+
+        *ev_stop (default 0.0)*
+            See *ev_step*                     
     '''
     import numpy as np
 
@@ -811,6 +826,15 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
         print('fix 3 beads langevin', args['tstart'], args['tstop'],
               args['damp'], args['seed'], file=f)
         print('timestep', args['timestep'], file=f)
+
+        # ramp excluded volume
+        if args['ev_step'] != 0:
+            print('variable evprefactor equal '
+                  'ramp(%f,%f)' % (args['ev_start'], args['ev_stop']),
+                  file=f)
+            print('fix 4 all adapt',
+                  args['ev_step'],
+                  'pair soft a * * v_evprefactor scale yes', file=f)
 
         # Region
         print('region mySphere sphere 0.0 0.0 0.0',

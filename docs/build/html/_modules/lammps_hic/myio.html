@@ -140,17 +140,14 @@
 
 <div class="viewcode-block" id="read_hss"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.read_hss">[docs]</a><span class="k">def</span> <span class="nf">read_hss</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">i</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    Reads all information in an hss file:</span>
+<span class="sd">    Reads all information in an hss file</span>
 
-<span class="sd">    - crd (numpy.ndarray(dtype=&#39;f4&#39;)): population coordinates</span>
-
-<span class="sd">    - radii (numpy.ndarray(dtype=&#39;f4&#39;)): bead radii</span>
-
-<span class="sd">    - chrom (numpy.ndarray(dtype=str)): chromosome tags</span>
-
-<span class="sd">    - n_struct (int): number of structures</span>
-
-<span class="sd">    - n_bead (int): number of beads in one structure</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        crd (numpy.ndarray(dtype=&#39;f4&#39;)): population coordinates</span>
+<span class="sd">        radii (numpy.ndarray(dtype=&#39;f4&#39;)): bead radii</span>
+<span class="sd">        chrom (numpy.ndarray(dtype=str)): chromosome tags</span>
+<span class="sd">        n_struct (int): number of structures</span>
+<span class="sd">        n_bead (int): number of beads in one structure</span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -223,6 +220,27 @@
         <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{}</span><span class="s1">_</span><span class="si">{}</span><span class="s1">.hms&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">fname</span><span class="p">):</span>
             <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">fname</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">dump_violations</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">violations</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;STRUCTURE:&#39;</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">violations</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;bt&#39;</span><span class="p">],</span> <span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;i&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;j&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;absv&#39;</span><span class="p">],</span> <span class="n">v</span><span class="p">[</span><span class="s1">&#39;relv&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">dump_info_header</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">info</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;# structure&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">info</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">),</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">dump_info</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">structure_index</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">structure_index</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">info</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;  &#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">file</span><span class="p">)</span>
 
 
 <div class="viewcode-block" id="pack_hms"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.pack_hms">[docs]</a><span class="k">def</span> <span class="nf">pack_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">hss</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">violations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">remove_after</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
@@ -303,7 +321,6 @@
             <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">hss</span><span class="p">)</span>
         <span class="k">raise</span></div>
     
-
 
 
 

@@ -70,13 +70,13 @@
 <span class="c1"># along with this program.  If not, see &lt;http://www.gnu.org/licenses/&gt;.</span>
 
 <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">The *random* module provides functions for the generation</span>
+<span class="sd">The **random** module provides functions for the generation</span>
 <span class="sd">of the initial coordinates</span>
 <span class="sd">&#39;&#39;&#39;</span>
 
 <span class="kn">from</span> <span class="nn">__future__</span> <span class="k">import</span> <span class="n">print_function</span><span class="p">,</span> <span class="n">division</span>
 <span class="kn">import</span> <span class="nn">numpy</span>
-<span class="kn">from</span> <span class="nn">numpy.random</span> <span class="k">import</span> <span class="n">uniform</span>
+<span class="kn">import</span> <span class="nn">numpy.random</span>
 <span class="kn">import</span> <span class="nn">logging</span>
 <span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
 <span class="kn">import</span> <span class="nn">time</span>
@@ -104,9 +104,9 @@
 <span class="sd">        numpy.array:</span>
 <span class="sd">            triplet of coordinates x, y, z </span>
 <span class="sd">    &#39;&#39;&#39;</span>
-    <span class="n">phi</span> <span class="o">=</span> <span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">pi</span><span class="p">)</span>
-    <span class="n">costheta</span> <span class="o">=</span> <span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="n">u</span> <span class="o">=</span> <span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">phi</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">pi</span><span class="p">)</span>
+    <span class="n">costheta</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">u</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
 
     <span class="n">theta</span> <span class="o">=</span> <span class="n">acos</span><span class="p">(</span> <span class="n">costheta</span> <span class="p">)</span>
     <span class="n">r</span> <span class="o">=</span> <span class="n">R</span> <span class="o">*</span> <span class="p">(</span> <span class="n">u</span><span class="o">**</span><span class="p">(</span><span class="mf">1.</span><span class="o">/</span><span class="mf">3.</span><span class="p">)</span> <span class="p">)</span>
@@ -168,36 +168,30 @@
     
 
 <span class="k">def</span> <span class="nf">_write_random_hms</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
-    <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    Create a single hms file containing a random structure with</span>
-<span class="sd">    chromosome territories</span>
-
-<span class="sd">    Arguments:</span>
-<span class="sd">        radii (iterable): the radii of the beads, used only for creating </span>
-<span class="sd">                the hms file.</span>
-<span class="sd">        chrom (iterable): the chromosome tag for each bead. Note that </span>
-<span class="sd">            chromosome start and end are detected as changes in the </span>
-<span class="sd">            tag sequence</span>
-<span class="sd">        prefix (str): prefix of the hms file name</span>
-<span class="sd">        i (int): structure serial number</span>
-<span class="sd">        R (float): radius of the cell</span>
-
-<span class="sd">    Returns:</span>
-<span class="sd">        The function creates a file &lt;prefix&gt;_&lt;i&gt;.hms and returns None</span>
-<span class="sd">    &#39;&#39;&#39;</span>
     <span class="n">fname</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">_</span><span class="si">%d</span><span class="s1">.hms&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
     <span class="n">crd</span> <span class="o">=</span> <span class="n">generate_territories</span><span class="p">(</span><span class="n">chrom</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="n">R</span><span class="p">)</span>
     <span class="n">write_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">)</span>
 
 
-<span class="k">def</span> <span class="nf">_write_random_to_db</span><span class="p">(</span><span class="n">dbname</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mi">5000</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">_write_random_to_db</span><span class="p">(</span><span class="n">dbname</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
     <span class="kn">from</span> <span class="nn">lammps_hic.dbio</span> <span class="k">import</span> <span class="n">DBStructFile</span>
     <span class="n">crd</span> <span class="o">=</span> <span class="n">generate_territories</span><span class="p">(</span><span class="n">chrom</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="n">R</span><span class="p">)</span>
-    <span class="n">f</span> <span class="o">=</span> <span class="n">DBStructFile</span><span class="p">(</span><span class="n">dbname</span><span class="p">)</span>
+    <span class="n">f</span> <span class="o">=</span> <span class="n">DBStructFile</span><span class="p">(</span><span class="n">dbname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span>
     <span class="n">f</span><span class="o">.</span><span class="n">write_structure</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">crd</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="create_random_population_with_territories"><a class="viewcode-back" href="../../random.html#lammps_hic.random.create_random_population_with_territories">[docs]</a><span class="k">def</span> <span class="nf">create_random_population_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">ipp_client</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dbfile</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">_write_random_to_memmap</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="mf">5000.0</span><span class="p">):</span>
+    <span class="n">n_beads</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">chrom</span><span class="p">)</span>
+    <span class="n">crd</span> <span class="o">=</span> <span class="n">generate_territories</span><span class="p">(</span><span class="n">chrom</span><span class="p">,</span> <span class="n">R</span><span class="o">=</span><span class="n">R</span><span class="p">)</span>
+    <span class="c1"># assumes 4 bytes floating point</span>
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">n_beads</span><span class="o">*</span><span class="mi">3</span><span class="o">*</span><span class="mi">4</span><span class="o">*</span><span class="n">i</span>
+    <span class="n">f</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;r+&#39;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;float32&#39;</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">n_beads</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> 
+                     <span class="n">offset</span><span class="o">=</span><span class="n">offset</span><span class="p">)</span>
+    <span class="n">f</span><span class="p">[:]</span> <span class="o">=</span> <span class="n">crd</span><span class="p">[:]</span>
+    <span class="n">f</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="create_random_population_with_territories"><a class="viewcode-back" href="../../random.html#lammps_hic.random.create_random_population_with_territories">[docs]</a><span class="k">def</span> <span class="nf">create_random_population_with_territories</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">prefix</span><span class="p">,</span> <span class="n">ipp_client</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dbfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">memmap</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
 <span class="sd">    Creates a population of N = *n_struct* structures, each on a single hms file. </span>
 <span class="sd">    Each file path is determined as *&lt;prefix&gt;_&lt;n&gt;.hms* </span>
@@ -223,6 +217,8 @@
 <span class="sd">        dbfile (str): If None, the function will write hms files.</span>
 <span class="sd">            Else, will use the specified sqlite3 database file to </span>
 <span class="sd">            write the coordinates</span>
+<span class="sd">        memmap (str): If not None, coordinates will be written</span>
+<span class="sd">            to a numpy memmap instead of a hms or sqlite db.</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        N files: *prefix_\*.hms*, with * going from 0 to N-1</span>
@@ -237,6 +233,11 @@
                          <span class="n">chrom</span><span class="o">=</span><span class="n">chrom</span><span class="p">)</span>
         <span class="n">f</span><span class="o">.</span><span class="n">add_group</span><span class="p">(</span><span class="n">prefix</span><span class="p">)</span>
         <span class="n">genfunc</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">_write_random_to_db</span><span class="p">,</span> <span class="n">dbfile</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">memmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># create and close memmap</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span><span class="n">memmap</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;w+&#39;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;float32&#39;</span><span class="p">,</span> 
+                         <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">n_struct</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">chrom</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+        <span class="n">genfunc</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">_write_random_to_memmap</span><span class="p">,</span> <span class="n">memmap</span><span class="p">,</span> <span class="n">chrom</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="n">genfunc</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">_write_random_hms</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">,</span> <span class="n">prefix</span><span class="p">)</span>
 

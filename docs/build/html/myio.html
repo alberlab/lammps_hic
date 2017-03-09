@@ -96,14 +96,21 @@ Every record consists of:</p>
 <dl class="function">
 <dt id="lammps_hic.myio.read_hss">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">read_hss</code><span class="sig-paren">(</span><em>fname</em>, <em>i=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_hss" title="Permalink to this definition">¶</a></dt>
-<dd><p>Reads all information in an hss file:</p>
-<ul class="simple">
-<li>crd (numpy.ndarray(dtype=&#8217;f4&#8217;)): population coordinates</li>
-<li>radii (numpy.ndarray(dtype=&#8217;f4&#8217;)): bead radii</li>
-<li>chrom (numpy.ndarray(dtype=str)): chromosome tags</li>
-<li>n_struct (int): number of structures</li>
-<li>n_bead (int): number of beads in one structure</li>
-</ul>
+<dd><p>Reads all information in an hss file</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">population coordinates
+radii (numpy.ndarray(dtype=&#8217;f4&#8217;)): bead radii
+chrom (numpy.ndarray(dtype=str)): chromosome tags
+n_struct (int): number of structures
+n_bead (int): number of beads in one structure</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body">crd (numpy.ndarray(dtype=&#8217;f4&#8217;))</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">

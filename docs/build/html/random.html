@@ -53,11 +53,11 @@
             
   <div class="section" id="module-lammps_hic.random">
 <span id="generating-random-coordinates"></span><h1>Generating random coordinates<a class="headerlink" href="#module-lammps_hic.random" title="Permalink to this headline">¶</a></h1>
-<p>The <em>random</em> module provides functions for the generation
+<p>The <strong>random</strong> module provides functions for the generation
 of the initial coordinates</p>
 <dl class="function">
 <dt id="lammps_hic.random.create_random_population_with_territories">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_population_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>n_struct</em>, <em>prefix</em>, <em>ipp_client=None</em>, <em>dbfile=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_population_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_population_with_territories" title="Permalink to this definition">¶</a></dt>
+<code class="descclassname">lammps_hic.random.</code><code class="descname">create_random_population_with_territories</code><span class="sig-paren">(</span><em>radii</em>, <em>chrom</em>, <em>n_struct</em>, <em>prefix</em>, <em>ipp_client=None</em>, <em>dbfile=None</em>, <em>memmap=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/random.html#create_random_population_with_territories"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.random.create_random_population_with_territories" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a population of N = <em>n_struct</em> structures, each on a single hms file.
 Each file path is determined as <em>&lt;prefix&gt;_&lt;n&gt;.hms</em>
 where <em>n</em> goes from 0 to N-1.</p>
@@ -84,6 +84,8 @@ cloudpickle.</li>
 <li><strong>dbfile</strong> (<em>str</em>) &#8211; If None, the function will write hms files.
 Else, will use the specified sqlite3 database file to
 write the coordinates</li>
+<li><strong>memmap</strong> (<em>str</em>) &#8211; If not None, coordinates will be written
+to a numpy memmap instead of a hms or sqlite db.</li>
 </ul>
 </td>
 </tr>
@@ -126,79 +128,6 @@ tag sequence</li>
 </tr>
 </tbody>
 </table>
-</dd></dl>
-
-<dl class="function">
-<dt id="lammps_hic.random.uniform">
-<code class="descclassname">lammps_hic.random.</code><code class="descname">uniform</code><span class="sig-paren">(</span><em>low=0.0</em>, <em>high=1.0</em>, <em>size=None</em><span class="sig-paren">)</span><a class="headerlink" href="#lammps_hic.random.uniform" title="Permalink to this definition">¶</a></dt>
-<dd><p>Draw samples from a uniform distribution.</p>
-<p>Samples are uniformly distributed over the half-open interval
-<code class="docutils literal"><span class="pre">[low,</span> <span class="pre">high)</span></code> (includes low, but excludes high).  In other words,
-any value within the given interval is equally likely to be drawn
-by <cite>uniform</cite>.</p>
-<table class="docutils field-list" frame="void" rules="none">
-<col class="field-name" />
-<col class="field-body" />
-<tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
-<li><strong>low</strong> (<em>float</em><em>, </em><em>optional</em>) &#8211; Lower boundary of the output interval.  All values generated will be
-greater than or equal to low.  The default value is 0.</li>
-<li><strong>high</strong> (<em>float</em>) &#8211; Upper boundary of the output interval.  All values generated will be
-less than high.  The default value is 1.0.</li>
-<li><strong>size</strong> (<em>int</em><em> or </em><em>tuple of ints</em><em>, </em><em>optional</em>) &#8211; Output shape.  If the given shape is, e.g., <code class="docutils literal"><span class="pre">(m,</span> <span class="pre">n,</span> <span class="pre">k)</span></code>, then
-<code class="docutils literal"><span class="pre">m</span> <span class="pre">*</span> <span class="pre">n</span> <span class="pre">*</span> <span class="pre">k</span></code> samples are drawn.  Default is None, in which case a
-single value is returned.</li>
-</ul>
-</td>
-</tr>
-<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first"><strong>out</strong> &#8211; Drawn samples, with shape <cite>size</cite>.</p>
-</td>
-</tr>
-<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first last">ndarray</p>
-</td>
-</tr>
-</tbody>
-</table>
-<div class="admonition seealso">
-<p class="first admonition-title">See also</p>
-<dl class="last docutils">
-<dt><code class="xref py py-func docutils literal"><span class="pre">randint()</span></code></dt>
-<dd>Discrete uniform distribution, yielding integers.</dd>
-<dt><code class="xref py py-func docutils literal"><span class="pre">random_integers()</span></code></dt>
-<dd>Discrete uniform distribution over the closed interval <code class="docutils literal"><span class="pre">[low,</span> <span class="pre">high]</span></code>.</dd>
-<dt><code class="xref py py-func docutils literal"><span class="pre">random_sample()</span></code></dt>
-<dd>Floats uniformly distributed over <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">1)</span></code>.</dd>
-<dt><code class="xref py py-func docutils literal"><span class="pre">random()</span></code></dt>
-<dd>Alias for <cite>random_sample</cite>.</dd>
-<dt><code class="xref py py-func docutils literal"><span class="pre">rand()</span></code></dt>
-<dd>Convenience function that accepts dimensions as input, e.g., <code class="docutils literal"><span class="pre">rand(2,2)</span></code> would generate a 2-by-2 array of floats, uniformly distributed over <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">1)</span></code>.</dd>
-</dl>
-</div>
-<p class="rubric">Notes</p>
-<p>The probability density function of the uniform distribution is</p>
-<div class="math">
-\[p(x) = \frac{1}{b - a}\]</div>
-<p>anywhere within the interval <code class="docutils literal"><span class="pre">[a,</span> <span class="pre">b)</span></code>, and zero elsewhere.</p>
-<p class="rubric">Examples</p>
-<p>Draw samples from the distribution:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">1000</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>All values are within the given interval:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">s</span> <span class="o">&gt;=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-<span class="go">True</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">s</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
-<span class="go">True</span>
-</pre></div>
-</div>
-<p>Display the histogram of the samples, along with the
-probability density function:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">count</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">ignored</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">bins</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">bins</span><span class="p">),</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
-</pre></div>
-</div>
 </dd></dl>
 
 <dl class="function">
