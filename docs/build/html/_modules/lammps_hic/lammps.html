@@ -148,6 +148,14 @@
 <span class="p">}</span>
 
 
+<span class="k">class</span> <span class="nc">BT</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="n">CONSECUTIVE</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">HIC</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">DAMID</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">FISH_RADIAL</span> <span class="o">=</span> <span class="mi">3</span>
+    <span class="n">FISH_PAIR</span> <span class="o">=</span> <span class="mi">4</span>
+
+
 <span class="k">class</span> <span class="nc">BondType</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
 <span class="sd">    A bond type. The indexes are saved in</span>
@@ -212,6 +220,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bond_type_dict</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bond_annotations</span> <span class="o">=</span> <span class="p">[]</span>
 
 <div class="viewcode-block" id="BondContainer.add_type"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer.add_type">[docs]</a>    <span class="k">def</span> <span class="nf">add_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">type_str</span><span class="p">,</span> <span class="n">kspring</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
         <span class="sd">&#39;&#39;&#39;</span>
@@ -244,22 +253,24 @@
         <span class="k">else</span><span class="p">:</span> 
             <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">old_id</span><span class="p">]</span></div>
 
-<div class="viewcode-block" id="BondContainer.add_bond"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer.add_bond">[docs]</a>    <span class="k">def</span> <span class="nf">add_bond</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+<div class="viewcode-block" id="BondContainer.add_bond"><a class="viewcode-back" href="../../lammps.html#lammps_hic.lammps.BondContainer.add_bond">[docs]</a>    <span class="k">def</span> <span class="nf">add_bond</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bond_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">annotation</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
         <span class="sd">&#39;&#39;&#39;</span>
 <span class="sd">        Add a bond of type *bond_type* between *i* and *j* beads</span>
 
-<span class="sd">        :Arguments:</span>
-<span class="sd">            *bond_type*</span>
-<span class="sd">                A BondType instance returned by the add_type </span>
-<span class="sd">                function</span>
-<span class="sd">            *i, j*</span>
-<span class="sd">                Integer indexes of the two beads to be bound</span>
+<span class="sd">        Arguments:</span>
+<span class="sd">            bond_type (lammps_hic.lammps.BondType): a BondType instance </span>
+<span class="sd">                returned by the add_type function</span>
+<span class="sd">            i (int): Integer index of the first bound bead</span>
+<span class="sd">            j (int): Integer index of the second bound bead</span>
+<span class="sd">            annotation (optional): appends any annotation needed for</span>
+<span class="sd">                future use</span>
 <span class="sd">        &#39;&#39;&#39;</span>
         <span class="n">bond</span> <span class="o">=</span> <span class="n">Bond</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="p">),</span>
                     <span class="n">bond_type</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
                     <span class="n">i</span><span class="p">,</span>
                     <span class="n">j</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">bonds</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">bond</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bond_annotations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">annotation</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">bond</span></div></div>
 
 
@@ -479,7 +490,11 @@
 <span class="sd">            See *ev_step*</span>
 
 <span class="sd">        *ev_stop (default 0.0)*</span>
-<span class="sd">            See *ev_step*                     </span>
+<span class="sd">            See *ev_step*                   </span>
+
+<span class="sd">    :Returns:</span>
+<span class="sd">        *bond_list (lammps_hic.lammps.BondContainer)*</span>
+<span class="sd">            List of all added bonds  </span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 
@@ -533,7 +548,7 @@
             <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span> 
                                     <span class="n">kspring</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> 
                                     <span class="n">r0</span><span class="o">=</span><span class="mi">2</span><span class="o">*</span><span class="p">(</span><span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">+</span><span class="n">bead_radii</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]))</span>
-            <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">CONSECUTIVE</span><span class="p">)</span>
 
     <span class="c1">##############################</span>
     <span class="c1"># Add chromosome territories #</span>
@@ -606,13 +621,13 @@
 
             <span class="c1"># add bonds</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">HIC</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">HIC</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">HIC</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">dcc</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">HIC</span><span class="p">)</span>
 
     <span class="c1">#############################################</span>
     <span class="c1"># Activation distances for damid restraints #</span>
@@ -652,9 +667,9 @@
 
             <span class="c1"># add bonds</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">d</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">DAMID</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">cd</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">d</span><span class="p">:</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">DAMID</span><span class="p">)</span>
 
     <span class="c1">###############################################</span>
     <span class="c1"># Add bonds for fish restraints, if specified #</span>
@@ -682,11 +697,11 @@
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">td</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_RADIAL</span><span class="p">)</span>
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="n">td</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_RADIAL</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="n">maxradial</span><span class="p">:</span>
             <span class="n">cd</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
@@ -703,11 +718,11 @@
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="n">td</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_RADIAL</span><span class="p">)</span>
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">td</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">())</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">ii</span><span class="p">,</span> <span class="n">dummies</span><span class="o">.</span><span class="n">next</span><span class="p">(),</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_RADIAL</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="n">minpair</span><span class="p">:</span>
             <span class="n">pairs</span> <span class="o">=</span> <span class="n">hff</span><span class="p">[</span><span class="s1">&#39;pairs&#39;</span><span class="p">]</span>
@@ -724,10 +739,10 @@
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">dmin</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">]))</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
 
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
@@ -759,10 +774,10 @@
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
                                         <span class="n">r0</span><span class="o">=</span><span class="n">dmax</span> <span class="o">+</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_tol&#39;</span><span class="p">])</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
-                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
+                <span class="n">bond_list</span><span class="o">.</span><span class="n">add_bond</span><span class="p">(</span><span class="n">bt</span><span class="p">,</span> <span class="n">i</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">j</span> <span class="o">+</span> <span class="n">n_hapl</span><span class="p">,</span> <span class="n">BT</span><span class="o">.</span><span class="n">FISH_PAIR</span><span class="p">)</span>
 
                 <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">,</span>
                                         <span class="n">kspring</span><span class="o">=</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;fish_kspring&#39;</span><span class="p">],</span>
@@ -821,6 +836,7 @@
 
         <span class="c1"># Excluded volume coefficients</span>
         <span class="n">at_radii</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">atom_types_ids</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">atom_types_ids</span><span class="o">.</span><span class="n">__getitem__</span><span class="p">)]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">at_radii</span><span class="p">)</span>
 
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">PairIJ Coeffs</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ri</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">at_radii</span><span class="p">):</span>
@@ -878,14 +894,6 @@
               <span class="n">args</span><span class="p">[</span><span class="s1">&#39;damp&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;seed&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;timestep&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;timestep&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
 
-        <span class="c1"># ramp excluded volume</span>
-        <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_step&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;variable evprefactor equal &#39;</span>
-                  <span class="s1">&#39;ramp(</span><span class="si">%f</span><span class="s1">,</span><span class="si">%f</span><span class="s1">)&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_start&#39;</span><span class="p">],</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_stop&#39;</span><span class="p">]),</span>
-                  <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix 4 all adapt&#39;</span><span class="p">,</span>
-                  <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_step&#39;</span><span class="p">],</span>
-                  <span class="s1">&#39;pair soft a * * v_evprefactor scale yes&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
 
         <span class="c1"># Region</span>
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;region mySphere sphere 0.0 0.0 0.0&#39;</span><span class="p">,</span>
@@ -905,8 +913,22 @@
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;thermo_style custom step temp epair ebond&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;thermo&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;thermo&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
 
+        <span class="c1"># ramp excluded volume</span>
+        <span class="k">if</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_step&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">ev_val_step</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_stop&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_start&#39;</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_step&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_step&#39;</span><span class="p">]):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;variable evprefactor equal &#39;</span><span class="p">,</span>
+                      <span class="n">args</span><span class="p">[</span><span class="s1">&#39;ev_start&#39;</span><span class="p">]</span> <span class="o">+</span> <span class="n">ev_val_step</span><span class="o">*</span><span class="n">step</span><span class="p">,</span>
+                      <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+                <span class="c1">#&#39;ramp(%f,%f)&#39; % (args[&#39;ev_start&#39;], args[&#39;ev_stop&#39;]),</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;fix 4 all adapt 0&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;pair soft a * * v_evprefactor scale yes&#39;</span><span class="p">,</span>
+                      <span class="s1">&#39;reset yes&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;run&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;mdsteps&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;unfix 4&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
         <span class="c1"># Run MD</span>
-        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;run&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;mdsteps&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;run&#39;</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="s1">&#39;mdsteps&#39;</span><span class="p">],</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
 
         <span class="c1"># Run CG</span>
         <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;min_style cg&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">f</span><span class="p">)</span>
@@ -918,7 +940,7 @@
 
 <span class="k">def</span> <span class="nf">_check_violations</span><span class="p">(</span><span class="n">bond_list</span><span class="p">,</span> <span class="n">crd</span><span class="p">):</span>
     <span class="n">violations</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">bond</span> <span class="ow">in</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">bond_no</span><span class="p">,</span> <span class="n">bond</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">):</span>
         <span class="n">bt</span> <span class="o">=</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">bond_types</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">bond_type</span><span class="p">]</span>
         <span class="n">d</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">crd</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">crd</span><span class="p">[</span><span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">])</span>
         <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_upper_bound&#39;</span><span class="p">:</span>
@@ -926,13 +948,13 @@
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">d</span> <span class="o">-</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
                 <span class="k">if</span> <span class="n">relv</span> <span class="o">&gt;</span> <span class="mf">0.05</span><span class="p">:</span>
-                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bond_annotations</span><span class="p">[</span><span class="n">bond_no</span><span class="p">])))</span>
         <span class="k">if</span> <span class="n">bt</span><span class="o">.</span><span class="n">type_str</span> <span class="o">==</span> <span class="s1">&#39;harmonic_lower_bound&#39;</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">d</span> <span class="o">&lt;</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span><span class="p">:</span>
                 <span class="n">absv</span> <span class="o">=</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span>
                 <span class="n">relv</span> <span class="o">=</span> <span class="p">(</span><span class="n">bt</span><span class="o">.</span><span class="n">r0</span> <span class="o">-</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">bt</span><span class="o">.</span><span class="n">r0</span>
                 <span class="k">if</span> <span class="n">relv</span> <span class="o">&gt;</span> <span class="mf">0.05</span><span class="p">:</span>
-                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bt</span><span class="p">)))</span>
+                    <span class="n">violations</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">bond</span><span class="o">.</span><span class="n">i</span><span class="p">,</span> <span class="n">bond</span><span class="o">.</span><span class="n">j</span><span class="p">,</span> <span class="n">absv</span><span class="p">,</span> <span class="n">relv</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bond_annotations</span><span class="p">[</span><span class="n">bond_no</span><span class="p">])))</span>
     <span class="k">return</span> <span class="n">violations</span>
 
 
@@ -1115,6 +1137,9 @@
 
         <span class="c1"># get results</span>
         <span class="n">info</span> <span class="o">=</span> <span class="n">get_info_from_log</span><span class="p">(</span><span class="n">StringIO</span><span class="p">(</span><span class="n">unicode</span><span class="p">(</span><span class="n">output</span><span class="p">)))</span>
+        <span class="n">info</span><span class="p">[</span><span class="s1">&#39;n_restr&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bond_list</span><span class="o">.</span><span class="n">bonds</span><span class="p">)</span>
+        <span class="n">info</span><span class="p">[</span><span class="s1">&#39;n_hic_restr&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">([</span><span class="mi">1</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">bond_list</span><span class="o">.</span><span class="n">annotation</span> <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">BT</span><span class="o">.</span><span class="n">HIC</span><span class="p">])</span>
+        
         <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">traj_fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fd</span><span class="p">:</span>
             <span class="n">new_crd</span> <span class="o">=</span> <span class="n">get_last_frame</span><span class="p">(</span><span class="n">fd</span><span class="p">)</span>
 
@@ -1237,8 +1262,10 @@
             <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">prefix</span> <span class="o">+</span> <span class="s1">&#39;.incomplete.pickle&#39;</span><span class="p">)</span>
 
         <span class="n">energies</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;final-energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">_</span><span class="p">)</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">])</span>
-        <span class="n">violated</span> <span class="o">=</span> <span class="p">[(</span><span class="n">i</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">info</span><span class="p">,</span> <span class="n">violations</span><span class="p">)</span> <span class="ow">in</span> <span class="n">completed</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">violations</span><span class="p">)]</span>
-        <span class="n">n_violated</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">violated</span><span class="p">)</span>
+        <span class="n">n_violated</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">:</span>
+            <span class="n">n_violated</span> <span class="o">+=</span> <span class="mi">1</span> 
+
         <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%d</span><span class="s1"> structures with violations over </span><span class="si">%d</span><span class="s1"> structures&#39;</span><span class="p">,</span>
                      <span class="n">n_violated</span><span class="p">,</span>
                      <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">))</span>
@@ -1279,7 +1306,7 @@
 
 <span class="sd">    :Exceptions:</span>
 <span class="sd">        In case of failure, gracefully returns None and the traceback</span>
-<span class="sd">        (see above)</span>
+<span class="sd">        as the info parameter. </span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="c1"># importing here so it will be called on the parallel workers</span>

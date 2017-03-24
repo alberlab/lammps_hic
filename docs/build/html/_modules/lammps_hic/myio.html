@@ -140,7 +140,11 @@
 
 <div class="viewcode-block" id="read_hss"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.read_hss">[docs]</a><span class="k">def</span> <span class="nf">read_hss</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">i</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    Reads all information in an hss file</span>
+<span class="sd">    Reads information from an hss file.</span>
+<span class="sd">    Arguments:</span>
+<span class="sd">        fname (str): filename of hss file</span>
+<span class="sd">        i (int): if not None, returns the coordinates of the i-th structure</span>
+<span class="sd">            instead of the full population</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        crd (numpy.ndarray(dtype=&#39;f4&#39;)): population coordinates</span>
@@ -163,7 +167,12 @@
 
 <div class="viewcode-block" id="write_hss"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.write_hss">[docs]</a><span class="k">def</span> <span class="nf">write_hss</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="n">crd</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">chrom</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    TODO: write docs</span>
+<span class="sd">    Writes an hss file.</span>
+<span class="sd">    Arguments:</span>
+<span class="sd">        fname (str): path of hss file</span>
+<span class="sd">        crd (numpy.ndarray): coordinates of the whole population</span>
+<span class="sd">        radii (array of floats): radius for each bead</span>
+<span class="sd">        chrom (array of strings): chromosome tag for each bead</span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">radii</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">crd</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
         <span class="n">logging</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s1">&#39;write_hss(): len(radii) != crd.shape[1]&#39;</span><span class="p">)</span>
@@ -181,7 +190,18 @@
 
 <div class="viewcode-block" id="read_hms"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.read_hms">[docs]</a><span class="k">def</span> <span class="nf">read_hms</span><span class="p">(</span><span class="n">fname</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    TODO: write docs</span>
+<span class="sd">    Reads an hms file.</span>
+<span class="sd">    Arguments:</span>
+<span class="sd">        fname (str): hms file path</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        crd (np.ndarray(dtype=&#39;f4&#39;)): coordinates of the structure</span>
+<span class="sd">        radii (np.ndarray(dtype=&#39;f4&#39;)): radius for each bead</span>
+<span class="sd">        chrom (np.ndarray(dtype=&#39;S5&#39;)): chromosome tag for each bead</span>
+<span class="sd">        n_bead (int): the number of beads in the structure</span>
+<span class="sd">        violations (np.recarray): an array containing the violations.</span>
+<span class="sd">            Refer to the lammps.check_violations function documentation.</span>
+<span class="sd">        info (dict): a dictionary containing run informations.</span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">fname</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
         <span class="n">crd</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;coordinates&#39;</span><span class="p">][()]</span>
@@ -245,7 +265,20 @@
 
 <div class="viewcode-block" id="pack_hms"><a class="viewcode-back" href="../../myio.html#lammps_hic.myio.pack_hms">[docs]</a><span class="k">def</span> <span class="nf">pack_hms</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">n_struct</span><span class="p">,</span> <span class="n">hss</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">violations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">remove_after</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
     <span class="sd">&#39;&#39;&#39;</span>
-<span class="sd">    TODO: write docs</span>
+<span class="sd">    Compact a series of hms files into single summary files.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        prefix (str): prefix of hms files. The actual filenames are expected to be in</span>
+<span class="sd">            the form &lt;prefix&gt;_0.hms, &lt;prefix&gt;_1.hms, ... </span>
+<span class="sd">        n_struct (int): number of structure files</span>
+<span class="sd">        hss (str): if specified, filename where to save coordinates, radii and</span>
+<span class="sd">            chromosome index in hdf5 format</span>
+<span class="sd">        violations (str): if specified, filename where to save violations in text</span>
+<span class="sd">            format</span>
+<span class="sd">        info (str): if specified, filename where to save run information in</span>
+<span class="sd">            text format</span>
+<span class="sd">        remove_after (bool): if set to True, will delete all the original </span>
+<span class="sd">            hms files after completion</span>
 <span class="sd">    &#39;&#39;&#39;</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="n">n_violated</span> <span class="o">=</span> <span class="mi">0</span>

@@ -241,7 +241,7 @@ the LAMMPS executable.</p>
 </td>
 </tr>
 <tr class="field-even field"><th class="field-name" colspan="2">Additional keyword arguments:</th></tr>
-<tr class="field-even field"><td>&nbsp;</td><td class="field-body"><dl class="first last docutils">
+<tr class="field-even field"><td>&nbsp;</td><td class="field-body"><dl class="first docutils">
 <dt><em>nucleus_radius (default=5000.0)</em></dt>
 <dd><p class="first last">Radius of the nucleus in length units</p>
 </dd>
@@ -380,6 +380,13 @@ every <em>ev_step</em> timesteps.</p>
 </dl>
 </td>
 </tr>
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body"><dl class="first last docutils">
+<dt><em>bond_list (lammps_hic.lammps.BondContainer)</em></dt>
+<dd><p class="first last">List of all added bonds</p>
+</dd>
+</dl>
+</td>
+</tr>
 </tbody>
 </table>
 </dd></dl>
@@ -429,21 +436,20 @@ bond_types.</p>
 <p>This way, the check should be amortized O(1)</p>
 <dl class="method">
 <dt id="lammps_hic.lammps.BondContainer.add_bond">
-<code class="descname">add_bond</code><span class="sig-paren">(</span><em>bond_type</em>, <em>i</em>, <em>j</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer.add_bond"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer.add_bond" title="Permalink to this definition">¶</a></dt>
+<code class="descname">add_bond</code><span class="sig-paren">(</span><em>bond_type</em>, <em>i</em>, <em>j</em>, <em>annotation=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/lammps.html#BondContainer.add_bond"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.lammps.BondContainer.add_bond" title="Permalink to this definition">¶</a></dt>
 <dd><p>Add a bond of type <em>bond_type</em> between <em>i</em> and <em>j</em> beads</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
 <col class="field-body" />
 <tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Arguments:</th><td class="field-body"><dl class="first last docutils">
-<dt><em>bond_type</em></dt>
-<dd><p class="first last">A BondType instance returned by the add_type
-function</p>
-</dd>
-<dt><em>i, j</em></dt>
-<dd><p class="first last">Integer indexes of the two beads to be bound</p>
-</dd>
-</dl>
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>bond_type</strong> (<em>lammps_hic.lammps.BondType</em>) &#8211; a BondType instance
+returned by the add_type function</li>
+<li><strong>i</strong> (<em>int</em>) &#8211; Integer index of the first bound bead</li>
+<li><strong>j</strong> (<em>int</em>) &#8211; Integer index of the second bound bead</li>
+<li><strong>annotation</strong> (<em>optional</em>) &#8211; appends any annotation needed for
+future use</li>
+</ul>
 </td>
 </tr>
 </tbody>

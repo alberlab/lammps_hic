@@ -62,7 +62,28 @@ functions on hms, hss, actdist files.</p>
 <dl class="function">
 <dt id="lammps_hic.myio.pack_hms">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">pack_hms</code><span class="sig-paren">(</span><em>prefix</em>, <em>n_struct</em>, <em>hss=None</em>, <em>violations=None</em>, <em>info=None</em>, <em>remove_after=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#pack_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.pack_hms" title="Permalink to this definition">¶</a></dt>
-<dd><p>TODO: write docs</p>
+<dd><p>Compact a series of hms files into single summary files.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>prefix</strong> (<em>str</em>) &#8211; prefix of hms files. The actual filenames are expected to be in
+the form &lt;prefix&gt;_0.hms, &lt;prefix&gt;_1.hms, ...</li>
+<li><strong>n_struct</strong> (<em>int</em>) &#8211; number of structure files</li>
+<li><strong>hss</strong> (<em>str</em>) &#8211; if specified, filename where to save coordinates, radii and
+chromosome index in hdf5 format</li>
+<li><strong>violations</strong> (<em>str</em>) &#8211; if specified, filename where to save violations in text
+format</li>
+<li><strong>info</strong> (<em>str</em>) &#8211; if specified, filename where to save run information in
+text format</li>
+<li><strong>remove_after</strong> (<em>bool</em>) &#8211; if set to True, will delete all the original
+hms files after completion</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">
@@ -90,13 +111,37 @@ Every record consists of:</p>
 <dl class="function">
 <dt id="lammps_hic.myio.read_hms">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">read_hms</code><span class="sig-paren">(</span><em>fname</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_hms"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_hms" title="Permalink to this definition">¶</a></dt>
-<dd><p>TODO: write docs</p>
+<dd><p>Reads an hms file.
+:param fname: hms file path
+:type fname: str</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">coordinates of the structure
+radii (np.ndarray(dtype=&#8217;f4&#8217;)): radius for each bead
+chrom (np.ndarray(dtype=&#8217;S5&#8217;)): chromosome tag for each bead
+n_bead (int): the number of beads in the structure
+violations (np.recarray): an array containing the violations.<blockquote>
+<div>Refer to the lammps.check_violations function documentation.</div></blockquote>
+<p>info (dict): a dictionary containing run informations.</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body">crd (np.ndarray(dtype=&#8217;f4&#8217;))</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">
 <dt id="lammps_hic.myio.read_hss">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">read_hss</code><span class="sig-paren">(</span><em>fname</em>, <em>i=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#read_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.read_hss" title="Permalink to this definition">¶</a></dt>
-<dd><p>Reads all information in an hss file</p>
+<dd><p>Reads information from an hss file.
+:param fname: filename of hss file
+:type fname: str
+:param i: if not None, returns the coordinates of the i-th structure</p>
+<blockquote>
+<div>instead of the full population</div></blockquote>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
 <col class="field-body" />
@@ -128,7 +173,15 @@ n_bead (int): number of beads in one structure</td>
 <dl class="function">
 <dt id="lammps_hic.myio.write_hss">
 <code class="descclassname">lammps_hic.myio.</code><code class="descname">write_hss</code><span class="sig-paren">(</span><em>fname</em>, <em>crd</em>, <em>radii</em>, <em>chrom</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/lammps_hic/myio.html#write_hss"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#lammps_hic.myio.write_hss" title="Permalink to this definition">¶</a></dt>
-<dd><p>TODO: write docs</p>
+<dd><p>Writes an hss file.
+:param fname: path of hss file
+:type fname: str
+:param crd: coordinates of the whole population
+:type crd: numpy.ndarray
+:param radii: radius for each bead
+:type radii: array of floats
+:param chrom: chromosome tag for each bead
+:type chrom: array of strings</p>
 </dd></dl>
 
 </div>

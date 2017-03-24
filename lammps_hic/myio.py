@@ -89,7 +89,11 @@ def write_actdist():
 
 def read_hss(fname, i=None):
     '''
-    Reads all information in an hss file
+    Reads information from an hss file.
+    Arguments:
+        fname (str): filename of hss file
+        i (int): if not None, returns the coordinates of the i-th structure
+            instead of the full population
 
     Returns:
         crd (numpy.ndarray(dtype='f4')): population coordinates
@@ -112,7 +116,12 @@ def read_hss(fname, i=None):
 
 def write_hss(fname, crd, radii, chrom):
     '''
-    TODO: write docs
+    Writes an hss file.
+    Arguments:
+        fname (str): path of hss file
+        crd (numpy.ndarray): coordinates of the whole population
+        radii (array of floats): radius for each bead
+        chrom (array of strings): chromosome tag for each bead
     '''
     if len(radii) != len(crd[0]):
         logging.warning('write_hss(): len(radii) != crd.shape[1]')
@@ -130,7 +139,18 @@ def write_hss(fname, crd, radii, chrom):
 
 def read_hms(fname):
     '''
-    TODO: write docs
+    Reads an hms file.
+    Arguments:
+        fname (str): hms file path
+
+    Returns:
+        crd (np.ndarray(dtype='f4')): coordinates of the structure
+        radii (np.ndarray(dtype='f4')): radius for each bead
+        chrom (np.ndarray(dtype='S5')): chromosome tag for each bead
+        n_bead (int): the number of beads in the structure
+        violations (np.recarray): an array containing the violations.
+            Refer to the lammps.check_violations function documentation.
+        info (dict): a dictionary containing run informations.
     '''
     with h5py.File(fname, 'r') as f:
         crd = f['coordinates'][()]
@@ -194,7 +214,20 @@ def dump_info(file, info, structure_index):
 
 def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_after=False):
     '''
-    TODO: write docs
+    Compact a series of hms files into single summary files.
+
+    Arguments:
+        prefix (str): prefix of hms files. The actual filenames are expected to be in
+            the form <prefix>_0.hms, <prefix>_1.hms, ... 
+        n_struct (int): number of structure files
+        hss (str): if specified, filename where to save coordinates, radii and
+            chromosome index in hdf5 format
+        violations (str): if specified, filename where to save violations in text
+            format
+        info (str): if specified, filename where to save run information in
+            text format
+        remove_after (bool): if set to True, will delete all the original 
+            hms files after completion
     '''
     try:
         n_violated = 0
@@ -223,7 +256,7 @@ def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_afte
             hss_file['coordinates'][0] = crd
 
         if violations is not None:
-            if len(violations) > 0:
+            if len(cviol) > 0:
                 n_violated += 1
             violations_file = open(violations, 'w')
             _vprint(violations_file, cviol, 0)
@@ -248,7 +281,10 @@ def pack_hms(prefix, n_struct, hss=None, violations=None, info=None, remove_afte
                     hss_file['coordinates'][i] = f['coordinates'][()]
 
                 if violations:
-                    _vprint(violations_file, f['violations'][()], i)
+                    cviol = f['violations'][()]
+                    _vprint(violations_file, cviol, i)
+                    if len(cviol) > 0:
+                        n_violated += 1
 
                 if info:
                     _iprint(info_file, json.loads(f['info'][()]), i)
