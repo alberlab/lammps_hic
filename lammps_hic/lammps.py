@@ -288,24 +288,24 @@ def _chromosome_string_to_numeric_id(chrom):
     return chrom_id
 
 
-def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, radii, n_atoms):
+def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii, n_atoms):
     def get_cluster_size(n, radii):
         return 4 * np.sqrt(n - 1) * np.average(radii)
 
     with h5py.File(cluster_file) as f:
         cs = f['clusters_%d' % struct_i]['()']
     i = 0
-    centroid = n_atoms
+    centroids = []
     while (i < len(cs)):
         n = cs[i]
         beads = cs[i+1:i+1+n]
         csize = get_cluster_size(n, radii[beads])
         bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
         for b in beads:
-            bonds_container.add_bond(bt, centroid, b, BT.BARCODED_CLUSTER)    
-        centroid += 1
+            bonds_container.add_bond(bt, len(centroids), b, BT.BARCODED_CLUSTER)    
+        centroids.append(np.mean(coord[beads], axis=0))
         i += n + 1
-    return centroid
+    return centroids
 
 
 def generate_input(crd, bead_radii, chrom, **kwargs):
@@ -833,12 +833,12 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
             print(b, file=f)
 
         # Excluded volume coefficients
-        at_radii = [x for x in sorted(atom_types_ids, key=atom_types_ids.__getitem__)]
+        all_atoms_radii = [x for x in sorted(atom_types_ids, key=atom_types_ids.__getitem__)]
 
         print('\nPairIJ Coeffs\n', file=f)
-        for i, ri in enumerate(at_radii):
-            for j in range(i, len(at_radii)):
-                rj = at_radii[j] 
+        for i, ri in enumerate(all_atoms_radii):
+            for j in range(i, len(all_atoms_radii)):
+                rj = all_atoms_radii[j] 
                 dc = (ri + rj)
                 A = (dc/math.pi)**2
                 #sigma = dc / 1.1224 #(2**(1.0/6.0))
@@ -846,11 +846,11 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
                 print(i+1, j+1, A*args['evfactor'], dc, file=f)
         
         # dummies do not have excluded volume
-        for i in range(len(at_radii) + 1):
+        for i in range(len(all_atoms_radii) + 1):
             print(i+1, dummy_type, 0, 0, file=f)
 
         # centroids do not have excluded volume
-        for i in range(len(at_radii) + 2):
+        for i in range(len(all_atoms_radii) + 2):
             print(i+1, centroid_type, 0, 0, file=f)
 
 
