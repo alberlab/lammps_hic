@@ -1284,35 +1284,33 @@ def bulk_minimize(parallel_client,
         raise
 
     
-def _serial_lammps_call(largs):
+def _serial_lammps_call(iargs):
     '''
     Serial function to be mapped in parallel.
-
     It is intended to be used only internally by parallel routines.
 
-    :Arguments: 
-        *largs (tuple)* 
-            Triplet of filenames: (from, parameters, to). *from* and *to*
-            are hms files, parameters is a json dictionary of arguments
-            to the lammps_minimize call
+    Parameters
+    ---------- 
+        iargs (tuple): contains the following items:
+            - fname_from (string): the path to the memory map containing the
+                original coordinates
+            - fname_to (string): the path to the memory map containing the 
+                final coordinates
+            - fname_param (string): the path to the parameters file
+            - struct_id (int): the id of the structure to perform the
+                minimization on
     
-    :Output:
-        *returncode*
-            0 if success, None otherwise
-
-        *info*
-            Dictionary of info returned by lammps_minimize. If the 
-            run fails, info is set to the formatted traceback
-            string
-
-        *n_violations*
-            Number of violated restraint at the end of minimization;
-            is set to zero in case of failure.
-
-    :Exceptions:
-        In case of failure, gracefully returns None and the traceback
-        as the info parameter. 
+    Returns
+    -------
+        oargs (tuple): contains the following items:
+            - returncode (int): 0 if success, None otherwise
+            - info (dict): dictionary of info returned by lammps_minimize. 
+                If the run fails, info is set to the formatted traceback
+                string
+            - n_violations (int): Number of violated restraint at the end of 
+                minimization. 
     '''
+ 
     try:
         # importing here so it will be called on the parallel workers
         import json

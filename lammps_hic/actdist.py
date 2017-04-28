@@ -24,6 +24,7 @@ import scipy.sparse
 import scipy.io
 from itertools import izip
 import time
+import gzip
 
 from .myio import read_hss, read_full_actdist
 from .util import monitor_progress, pretty_tdelta
@@ -34,9 +35,39 @@ __license__ = "GPL"
 __version__ = "0.0.1"
 __email__   = "polles@usc.edu"
 
+# specifies the size (in bytes) for chunking the process
+chunk_size_hint = 500 * 1024 * 1024
 
-def _compute_actdist(data):
-    local_i, local_j, radii, to_process, nstruct = data
+def _load_memmap(name, path, mode='r+', shape=None, dtype='float32'):
+    """load a file on disk into the interactive namespace as a memmapped array"""
+    import numpy as np
+    globals()[name] = np.memmap(path, mode=mode, shape=shape, dtype=dtype)
+
+
+def _compute_actdist(i, j, ii, jj, pwish, plast):
+    '''
+    Serial function to compute the activation distances for a pair of loci 
+    It expects some variables to be defined in its scope:
+        'coordinates': a numpy-like array of the coordinates.
+        'radii': a numpy-like array of bead radii
+
+    Parameters
+    ----------
+        i (int): index of the first locus
+        j (int): index of the second locus
+        ii (list): list of bead indexes corresponding to locus i
+        jj (list): list of bead indexes corresponding to locus j
+        pwish (float): target contact probability
+        plast (float): the last refined probability
+
+    Returns
+    -------
+        tuple: contains the following items
+            - i (int)
+            - j (int)
+            - ad (float): the activation distance
+            - p: the refined probability
+    '''
 
     def existingPortion(v, rsum):
         return sum(v<=rsum)*1.0/len(v)
@@ -49,56 +80,57 @@ def _compute_actdist(data):
         return max(0, pclean)
         
 
-    '''The function to be returned'''
     import numpy as np
-    results = []
     
-    for i, j, pwish, plast in to_process:
-        
-        x1 = local_i['x1'][i-local_i['offset1']] 
-        x2 = local_i['x2'][i-local_i['offset2']]
-        y1 = local_j['x1'][j-local_j['offset1']] 
-        y2 = local_j['x2'][j-local_j['offset2']]
-        
-        
-        ri, rj = radii[i], radii[j]
+    n_struct = coordinates.shape[0]
 
-        d_sq = np.empty( (4, nstruct) )
-        d_sq[0] = np.sum(np.square(x1 - y1), axis=1)
-        d_sq[1] = np.sum(np.square(x2 - y2), axis=1)
-        d_sq[2] = np.sum(np.square(x1 - y2), axis=1)
-        d_sq[3] = np.sum(np.square(x2 - y1), axis=1)
+    n_combinations = len(ii)*len(jj)
+    n_possible_contacts = min(len(ii), len(jj))
 
-        sel_dist = np.empty(nstruct * 2)
-        pnow = 0
-        rcutsq = np.square(2 * (ri + rj))
+    ri, rj = radii[ii[0]], radii[jj[0]]
 
-        for n in range(nstruct):
-            z = d_sq[:, n]
+    d_sq = np.empty((n_combinations, n_struct))    
+    for k in ii:
+        for m in jj:
+            x = coordinates[:, k, :]
+            y = coordinates[:, m, :] 
+            d_sq[i] = np.sum(np.square(x - y), axis=1)
+    
+    pnow = 0
+    rcutsq = np.square(2 * (ri + rj))
+    d_sq.sort(axis=0)
 
-            # assume the closest pair as the first (eventual) contact  
-            # and keep the distance of the only other pair which is compatible with it.
-            m = np.argsort(z)[0]
-            if m == 0 or m == 1:
-                sel_dist[2*n:2*n+2] = z[0:2]
-                pnow += np.sum( z[0:2] <= rcutsq )    
-            else:                   
-                sel_dist[2*n:2*n+2] = z[2:4]
-                pnow += np.sum( z[2:4] <= rcutsq )    
+    #for n in range(n_struct):
+    #    z = d_sq[:, n]
+        #icopy_selected = [False] * len(ii)
+        #jcopy_selected = [False] * len(jj)
 
-        pnow = float(pnow) / (2.0 * nstruct)
-        sortdist_sq = np.sort(sel_dist)
+        #sorted_indexes = np.argsort(z)
 
-        t = cleanProbability(pnow, plast)
-        p = cleanProbability(pwish,t)
+        #for index in sorted_indexes:
+        #    icopy = index / len(jj)
+        #    jcopy = index % len(jj)
+        #    if (icopy_selected[icopy] == False and 
+        #        jcopy_selected[jcopy] == False):
+        #        icopy_selected[icopy] == True
+        #        jcopy_selected[jcopy] == True
+        #        selected_dist.append(d_sq[index])
+        #        pnow += np.count_nonzero(d_sq[index] <= rcutsq)
+    
+    contact_count = np.count_nonzero(d_sq[0:n_possible_contacts, :] <= rcutsq)
+    pnow = float(contact_count) / (n_possible_contacts * n_struct)
+    sortdist_sq = np.sort(d_sq[0:n_possible_contacts, :])
 
-        res = None
-        if p>0:
-            o = min(2 * nstruct - 1, int(round(2 * p * nstruct)))
-            activation_distance = np.sqrt(sortdist_sq[o]) - (ri + rj)
-            res = (i, j, pwish, activation_distance, p, pnow)
-            results.append(res)
-    return results
+    t = cleanProbability(pnow, plast)
+    p = cleanProbability(pwish, t)
+
+    res = None
+    if p>0:
+        o = min(n_possible_contacts * n_struct - 1, 
+                int(round(n_possible_contacts * p * n_struct)))
+        activation_distance = np.sqrt(sortdist_sq[o]) - (ri + rj)
+        res = (i, j, activation_distance, p)
+    return res
 
 
 def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None, scatter=3):
@@ -148,6 +180,13 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     # setup logger
     logger = logging.getLogger()
     logger.info('Starting contact activation distance job on %s, p = %.3f, %d workers', crd_fname, theta, len(parallel_client))
+
+    # read the matrix in gzipped sparse coordinates format
+    fp = gzip.open(probability_matrix)
+    lines = fp.readlines(chunk_size_hint)
+    while len(lines) != 0:
+         
+
 
     # transform any matrix argiment in a scipy coo sparse matrix
     start = time.time() 
