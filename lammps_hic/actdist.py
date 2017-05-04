@@ -20,11 +20,17 @@
 
 import logging
 import numpy as np
+from numpy.lib.format import open_memmap
 import scipy.sparse 
 import scipy.io
-from itertools import izip
+try:
+    from itertools import izip
+except(ImportError):
+    izip = zip
 import time
 import gzip
+import h5py
+from bisect import bisect
 
 from .myio import read_hss, read_full_actdist
 from .util import monitor_progress, pretty_tdelta
@@ -37,11 +43,47 @@ __email__   = "polles@usc.edu"
 
 # specifies the size (in bytes) for chunking the process
 chunk_size_hint = 500 * 1024 * 1024
+actdist_shape = [('i', 'int32'), ('j', 'int32'), ('pwish', 'float32'), ('ad', 'float32'), ('plast', 'float32')]
+
+
+def _get_copy_index(index):
+    tmp_index = {}
+    for i, (chrom, start, end, _) in enumerate(index):
+        if (chrom, start, end) not in copy_index:
+            tmp_index[(chrom, start, end)] = [i]
+        else:
+            tmp_index[(chrom, start, end)] += [i]
+    # use first index as a key
+    copy_index = {ii[0]: ii for ii in tmp_index}
+    return copy_index
+
+
+def get_sorted_coo_matrix(matrix_file, out_matrix_file, chunksize=int(1e7)):
+    h5f = h5py.File(matrix_file, 'r')
+    
+    #  TODO: here I should use an extern sort to deal with very large 
+    #  matrices
+    nnz = h5f['/matrix/data'].shape[0]
+    vals = h5f['/matrix/data'][()]
+    sorted_pos = np.argsort(vals)
+
+    adf = open_memmap(out_matrix_file, 'w+', shape=(nnz,), 
+                      dtype=[('i', 'int32'), ('j', 'int32'), ('p', 'float32')])
+
+    indptr = h5f['/matrix/indptr'][()]
+
+    for k, pos in enumerate(sorted_pos):
+        i = bisect(indptr, pos)
+        j = h5f['/matrix/indices'][pos][()]
+        v = vals[pos]
+        adf[k] = (i, j, v)
+
+
 
 def _load_memmap(name, path, mode='r+', shape=None, dtype='float32'):
     """load a file on disk into the interactive namespace as a memmapped array"""
-    import numpy as np
-    globals()[name] = np.memmap(path, mode=mode, shape=shape, dtype=dtype)
+    from numpy.lib.format import open_memmap
+    globals()[name] = open_memmap(path, mode=mode, shape=shape, dtype=dtype)
 
 
 def _compute_actdist(i, j, ii, jj, pwish, plast):
@@ -133,23 +175,27 @@ def _compute_actdist(i, j, ii, jj, pwish, plast):
     return res
 
 
-def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad, save_to=None, scatter=3):
+def get_actdists(parallel_client, hss_fname, crd_memmap, actdist_file, 
+                 new_actdist_file, theta, max_round_size=int(1e7)):
     '''
     Compute activation distances using ipyparallel. 
 
-    Arguments:
-    
-        parallel_client (ipyparallel.Client): an ipyparallel Client istance 
-            to send jobs
-        crd_fname (str): an hss filename of the coordinates
-        probability_matrix (str): the contact probability matrix file
-        theta (float): consider only contacts with probability greater or 
-            equal to theta
-        last_ad: last activation distances. Either the filename or an 
+    Parameters
+    ----------
+        parallel_client : ipyparallel.Client
+            an ipyparallel Client instance to send parallel jobs to
+        crd_fname : str 
+            an hss filename of the coordinates
+        probability_matrix : str 
+            the contact probability matrix file
+        theta : float
+            consider only contacts with probability greater or equal to theta
+        actdist_file : str 
+            last activation distances. Either the filename or an 
             iterable with the activation distances of the last step, or None.
-        save_to (str): file where to save the newly computed activation 
-            distances
-        scatter 
+        new_actdist_file : str 
+            file where to save the newly computed activation distances
+        scatter : int
             level of block subdivisions of the matrix. This function
             divide the needed computations into blocks before sending the request
             to parallel workers. It is a compromise between (i) sending coordinates for
@@ -168,7 +214,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
             number of blocks is ~100 times the number of workers.
 
     Returns:
-        numpy.recarray:
+        numpy.recarray
             a numpy recarray with the newly computed activation distances. If
             *save_to* is not None, the recarray will be dumped to the 
             specified file 
@@ -181,11 +227,40 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     logger = logging.getLogger()
     logger.info('Starting contact activation distance job on %s, p = %.3f, %d workers', crd_fname, theta, len(parallel_client))
 
-    # read the matrix in gzipped sparse coordinates format
-    fp = gzip.open(probability_matrix)
-    lines = fp.readlines(chunk_size_hint)
-    while len(lines) != 0:
-         
+    # reads the activation distances memory map
+    ads = open_memmap(actdist_file)
+    n_tot_items = ads.shape[0]
+    logger.info('Actdist counts %d items', n_tot_items)
+    
+    # reads index and info from the hss file
+    with HssFile(hss_fname) as hss:
+        radii = hss.get_radii()
+        index = hss.get_index()
+    copy_index = _get_copy_index(index)
+
+    # TODO:initialize workers
+
+    # maps jobs
+    round_num = 0
+    done = False
+    while not done:
+        round_num += 1
+        logger.info('Round number: %d', round_num)
+        c0 = (round_num - 1) * max_round_size
+        c1 = min(n_tot_items, round_num * max_round_size)
+        need_processing = ads[c0:c1]['pwish'] >= theta
+        ads_to_process = ads[c0:c1][need_processing]
+        pargs = []
+        for i, j, pwish, ad, plast in ads_to_process:
+            ii = copy_index(index[i].chrom, index[i].start, index[i].end)
+            jj = copy_index(index[j].chrom, index[j].start, index[j].end)
+            pargs.append[(i, j, ii, jj, pwish, plast)]
+
+
+        if np.count_nonzero(need_processing) != max_round_size:
+            done = True
+
+
 
 
     # transform any matrix argiment in a scipy coo sparse matrix
