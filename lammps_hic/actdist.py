@@ -21,19 +21,15 @@
 import logging
 import numpy as np
 from numpy.lib.format import open_memmap
-import scipy.sparse 
-import scipy.io
-try:
-    from itertools import izip
-except(ImportError):
-    izip = zip
 import time
-import gzip
 import h5py
+import gzip
 from bisect import bisect
+from itertools import islice
 
-from .myio import read_hss, read_full_actdist
-from .util import monitor_progress, pretty_tdelta
+from alabtools.utils import HssFile
+
+
 
 
 __author__  = "Guido Polles"
@@ -43,13 +39,13 @@ __email__   = "polles@usc.edu"
 
 # specifies the size (in bytes) for chunking the process
 chunk_size_hint = 500 * 1024 * 1024
-actdist_shape = [('i', 'int32'), ('j', 'int32'), ('pwish', 'float32'), ('ad', 'float32'), ('plast', 'float32')]
+actdist_shape = [('i', 'int32'), ('j', 'int32'), ('ad', 'float32'), ('plast', 'float32')]
 
 
 def _get_copy_index(index):
     tmp_index = {}
     for i, (chrom, start, end, _) in enumerate(index):
-        if (chrom, start, end) not in copy_index:
+        if (chrom, start, end) not in tmp_index:
             tmp_index[(chrom, start, end)] = [i]
         else:
             tmp_index[(chrom, start, end)] += [i]
@@ -57,48 +53,44 @@ def _get_copy_index(index):
     copy_index = {ii[0]: ii for ii in tmp_index}
     return copy_index
 
-
 def get_sorted_coo_matrix(matrix_file, out_matrix_file, chunksize=int(1e7)):
-    h5f = h5py.File(matrix_file, 'r')
-    
-    #  TODO: here I should use an extern sort to deal with very large 
-    #  matrices
-    nnz = h5f['/matrix/data'].shape[0]
-    vals = h5f['/matrix/data'][()]
-    sorted_pos = np.argsort(vals)
+    with h5py.File(matrix_file, 'r') as h5f:
+        #  TODO: here I should use an extern sort to deal with very large 
+        #  matrices
+        nnz = h5f['/matrix/data'].shape[0]
+        vals = h5f['/matrix/data'][()]
+        sorted_pos = np.argsort(vals)
 
-    adf = open_memmap(out_matrix_file, 'w+', shape=(nnz,), 
-                      dtype=[('i', 'int32'), ('j', 'int32'), ('p', 'float32')])
+        adf = open_memmap(out_matrix_file, 'w+', shape=(nnz,), 
+                          dtype=[('i', 'int32'), ('j', 'int32'), ('p', 'float32')])
 
-    indptr = h5f['/matrix/indptr'][()]
+        indptr = h5f['/matrix/indptr'][()]
 
-    for k, pos in enumerate(sorted_pos):
-        i = bisect(indptr, pos)
-        j = h5f['/matrix/indices'][pos][()]
-        v = vals[pos]
-        adf[k] = (i, j, v)
-
-
+        ii = np.searchsorted(indptr, sorted_pos, 'right')
+        for k, pos in enumerate(sorted_pos):
+            i = ii[k]
+            j = h5f['/matrix/indices'][pos][()]
+            v = vals[pos]
+            adf[k] = (i, j, v)
+        adf.flush()
 
 def _load_memmap(name, path, mode='r+', shape=None, dtype='float32'):
     """load a file on disk into the interactive namespace as a memmapped array"""
     from numpy.lib.format import open_memmap
     globals()[name] = open_memmap(path, mode=mode, shape=shape, dtype=dtype)
 
-
-def _compute_actdist(i, j, ii, jj, pwish, plast):
+def _compute_actdist(i, j, pwish, plast):
     '''
     Serial function to compute the activation distances for a pair of loci 
     It expects some variables to be defined in its scope:
         'coordinates': a numpy-like array of the coordinates.
         'radii': a numpy-like array of bead radii
+        'copy_index': a dict specifying all the copies of each locus
 
     Parameters
     ----------
         i (int): index of the first locus
         j (int): index of the second locus
-        ii (list): list of bead indexes corresponding to locus i
-        jj (list): list of bead indexes corresponding to locus j
         pwish (float): target contact probability
         plast (float): the last refined probability
 
@@ -110,6 +102,10 @@ def _compute_actdist(i, j, ii, jj, pwish, plast):
             - ad (float): the activation distance
             - p: the refined probability
     '''
+
+    global coordinates
+    global radii
+    global copy_index
 
     def existingPortion(v, rsum):
         return sum(v<=rsum)*1.0/len(v)
@@ -125,6 +121,8 @@ def _compute_actdist(i, j, ii, jj, pwish, plast):
     import numpy as np
     
     n_struct = coordinates.shape[0]
+    ii = copy_index[i]
+    jj = copy_index[j]
 
     n_combinations = len(ii)*len(jj)
     n_possible_contacts = min(len(ii), len(jj))
@@ -174,9 +172,9 @@ def _compute_actdist(i, j, ii, jj, pwish, plast):
         res = (i, j, activation_distance, p)
     return res
 
-
-def get_actdists(parallel_client, hss_fname, crd_memmap, actdist_file, 
-                 new_actdist_file, theta, max_round_size=int(1e7)):
+def get_actdists(parallel_client, hss_fname, matrix_memmap, crd_memmap, 
+                 actdist_file, new_actdist_file, theta, 
+                 max_round_size=int(1e7), chunksize=30):
     '''
     Compute activation distances using ipyparallel. 
 
@@ -184,179 +182,121 @@ def get_actdists(parallel_client, hss_fname, crd_memmap, actdist_file,
     ----------
         parallel_client : ipyparallel.Client
             an ipyparallel Client instance to send parallel jobs to
-        crd_fname : str 
-            an hss filename of the coordinates
-        probability_matrix : str 
+        hss_fname : str 
+            an hss filename containing radii an index
+        matrix_memmap : str 
             the contact probability matrix file
-        theta : float
-            consider only contacts with probability greater or equal to theta
+        crd_memmap : str 
+            the coordinates file
         actdist_file : str 
-            last activation distances. Either the filename or an 
-            iterable with the activation distances of the last step, or None.
+            last activation distances file.
         new_actdist_file : str 
             file where to save the newly computed activation distances
-        scatter : int
-            level of block subdivisions of the matrix. This function
-            divide the needed computations into blocks before sending the request
-            to parallel workers. It is a compromise between (i) sending coordinates for
-            every i, j pair computation and (ii) sending all the coordinates to the workers. 
-            Option (i) would require a lot of communication, while option
-            (ii) would require a lot of memory on workers.
-            Hence, i's and j's are subdivided into blocks and sent to the workers, toghether
-            with the needed coordinates. Note that usually blocks on the diagonal 
-            have a ton more contacts, hence for load balancing purposes the total number of blocks
-            should be larger than the number of workers. scatter=1 means that the 
-            number of blocks is just big enough to have all workers receiving at
-            least 1 job. Hence, blocks are big and the load is not really balanced.
-            Higher values of scatter correspond to smaller blocks and better balancing
-            at the cost of increased communication. Note that scatter increase
-            the *linear* number of blocks, so scatter=10 means that the total
-            number of blocks is ~100 times the number of workers.
+        theta : float
+            consider only contacts with probability greater or equal to theta
+        max_round_size : int
+            Maximum number of items processed at one time
+        chunksize : int
+            Number of items in a single request to a worker
 
-    Returns:
-        numpy.recarray
-            a numpy recarray with the newly computed activation distances. If
-            *save_to* is not None, the recarray will be dumped to the 
-            specified file 
+    Returns
+    -------
+        None 
 
-    Raises:
-        RuntimeError if the parallel client has no registered workers.
+    Raises
+    ------
+        RuntimeError : if the parallel client has no registered workers.
     '''
 
     # setup logger
     logger = logging.getLogger()
-    logger.info('Starting contact activation distance job on %s, p = %.3f, %d workers', crd_fname, theta, len(parallel_client))
-
-    # reads the activation distances memory map
-    ads = open_memmap(actdist_file)
-    n_tot_items = ads.shape[0]
-    logger.info('Actdist counts %d items', n_tot_items)
     
-    # reads index and info from the hss file
+    # check that we have workers ready
+    engine_ids = list(parallel_client.ids)
+    n_workers = len(engine_ids)
+    if n_workers == 0:
+        logger.error('get_actdists(): No Engines Registered')
+        raise RuntimeError('get_actdists(): No Engines Registered')
+    
+    logger.info('Starting contact activation distance job on %s, p = %.3f,'
+                ' %d workers', crd_memmap, theta, n_workers)
+
+    # reads index and radii from the hss file
     with HssFile(hss_fname) as hss:
         radii = hss.get_radii()
         index = hss.get_index()
+
+    # generate an index of the copies of each locus
     copy_index = _get_copy_index(index)
 
-    # TODO:initialize workers
+    # Send static data and open the memmap of the coordinates on workers
+    workers = parallel_client[engine_ids]
+    workers.apply_sync(_load_memmap, 'coordinates', crd_memmap, mode='r')
+    workers['radii'] = radii
+    workers['copy_index'] = copy_index
+    
+    # opens actdists files
+    ad_in = gzip.open(actdist_file)
+    ad_out = gzip.open(new_actdist_file, 'w')
 
-    # maps jobs
+    # opens probability matrix file
+    pm = open_memmap(matrix_memmap, 'r')
+
+    # process matrix
     round_num = 0
     done = False
     while not done:
         round_num += 1
         logger.info('Round number: %d', round_num)
+        start = time.time() 
+
+        # get a chunk of the matrix in memory
         c0 = (round_num - 1) * max_round_size
-        c1 = min(n_tot_items, round_num * max_round_size)
-        need_processing = ads[c0:c1]['pwish'] >= theta
-        ads_to_process = ads[c0:c1][need_processing]
-        pargs = []
-        for i, j, pwish, ad, plast in ads_to_process:
-            ii = copy_index(index[i].chrom, index[i].start, index[i].end)
-            jj = copy_index(index[j].chrom, index[j].start, index[j].end)
-            pargs.append[(i, j, ii, jj, pwish, plast)]
+        c1 = round_num * max_round_size
+        if c1 >= len(pm):
+            c1 = len(pm)
+            done = True 
+        items = pm[c0:c1][:]
 
-
-        if np.count_nonzero(need_processing) != max_round_size:
+        # discard items < theta
+        is_used = items >= theta
+        n_used = np.count_nonzero(is_used)
+        # matrix is sorted, if there's an element less than theta,
+        # all the following elements will be < theta
+        if np.size(is_used) - n_used > 0:
             done = True
 
+        # read the last refined probabilities, if present
+        old_ads = []
+        for line in islice(ad_in, n_used):
+            lsp = line.split()
+            i = int(lsp[0])
+            j = int(lsp[1])
+            p = int(lsp[3])
+            old_ads.append((i, j, p))
 
+        n_ads = len(old_ads)
 
+        # prepare the arguments
+        pargs = []
+        for k in range(n_used):
+            i, j, p = items[k]
+            if k < n_ads:
+                assert old_ads[k][0] == i and old_ads[k][1] == j
+                op = old_ads[k][2]
+            else:
+                op = 0
+            pargs.append((i, j, p, op))
 
-    # transform any matrix argiment in a scipy coo sparse matrix
-    start = time.time() 
-    if isinstance(probability_matrix, str) or isinstance(probability_matrix, unicode):
-        probability_matrix = scipy.io.mmread(probability_matrix)
-    elif isinstance(probability_matrix, np.ndarray):
-        probability_matrix = scipy.sparse.coo_matrix(np.triu(probability_matrix, 2))
-    end = time.time()
-    logger.debug('get_actdist(): timing for matrix io: %f', end-start)
+        # send the jobs to the workers
+        workers = parallel_client.load_balanced_view(engine_ids)
+        results = workers.map_async(_compute_actdist, pargs, 
+                                    chunksize=chunksize)
 
-    # read the last activation distances and create a dictionary
-    if last_ad is None:
-        last_ad = []
-    elif isinstance(last_ad, str) or isinstance(last_ad, unicode):
-        last_ad = read_full_actdist(last_ad)
+        for r in results:
+            ad_out.write('%d %d %.2f %.4f\n' % r)
 
-    # read coordinates from hss  
-    start = time.time() 
-    crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)    
-    n_loci = probability_matrix.shape[0]
-    last_prob = {(i, j): p for i, j, pw, d, p, pn in last_ad}
-    n_workers = len(parallel_client.ids)
-    end = time.time()
-    logger.debug('get_actdist(): timing for dictionary creation: %f', end-start)
-
-    # check we have workers
-    if n_workers == 0:
-        logger.error('get_actdists(): No Engines Registered')
-        raise RuntimeError('get_actdists(): No Engines Registered')
-    
-    # heuristic to have reasonably small communication but
-    # using all the workers. We subdivide in blocks the i, j
-    # matrix, such that the blocks are ~10 times the number of 
-    # workers. This allows for some balancing but not resulting
-    # in eccessive communication.
-    start = time.time() 
-    blocks_per_line = scatter * int(np.sqrt(0.25 + 2 * n_workers) - 0.5)
-    if blocks_per_line > n_loci:
-        blocks_per_line = n_loci
-    block_size = (n_loci // blocks_per_line) + 1
-    blocks = {(i, j): list() for i in range(blocks_per_line) for j in range(i, blocks_per_line)}
-    
-    for i, j, v in izip(probability_matrix.row, probability_matrix.col, probability_matrix.data):
-        if v >= theta:
-            if i > j:
-                i, j = j, i
-            lp = last_prob.get((i, j), 0)
-            blocks[(i // block_size, j // block_size)].append((i, j, v, lp))
-
-        
-    # select the data chunks to be sent to the workers
-    local_data = []
-    for k in range(blocks_per_line):
-        offset1 = k * block_size
-        offset2 = k * block_size
-        x1 = crd[:, k * block_size:min((k + 1) * block_size, n_loci), :].transpose((1, 0, 2))
-        x2 = crd[:, k * block_size + n_loci:min((k + 1) * block_size + n_loci, 2*n_loci), :].transpose((1, 0, 2))
-        local_data.append({'offset1' : offset1, 'offset2': offset2, 'x1': x1, 'x2': x2})
-    
-    # prepare the arguments. We send a block only if there's work to do
-    args = []
-    for bi in range(blocks_per_line):
-        for bj in range(bi, blocks_per_line):
-            if len(blocks[(bi, bj)]) > 0:
-                args.append([local_data[bi], local_data[bj], radii, blocks[(bi, bj)], n_struct])
-                # logger.debug('get_actdist(): block: %d %d n: %d', bi, bj, len(blocks[(bi, bj)]))
-    end = time.time()
-    logger.debug('get_actdist(): timing for data distribution: %f', end-start)
-    
-    # actually send the jobs
-    engine_ids = list(parallel_client.ids)
-    dview = parallel_client[:]
-    dview.use_cloudpickle()
-    lbview = parallel_client.load_balanced_view(engine_ids)
-    async_results = lbview.map_async(_compute_actdist, args)
-    monitor_progress('get_actdists()', async_results)
-        
-    # merge results
-    results = []
-    for r in async_results.get():
-        results += r
-        
-    if save_to is not None:
-        np.savetxt(save_to,
-                   results,
-                   fmt='%6d %6d %.5f %10.2f %.5f %.5f')  #myio.ACTDIST_TXT_FMT)
-
-    columns =[('i', int),
-              ('j', int),
-              ('pwish', float),
-              ('actdist', float),
-              ('pclean', float),
-              ('pnow', float)]
-
-    logger.info('Done with contact activation distance job on %s, p = %.3f (walltime: %s)', crd_fname, theta, pretty_tdelta(async_results.wall_time))
-    
-    return np.array(results, dtype=columns).view(np.recarray)
+        end = time.time()
+        logger.debug('get_actdist(): timing for round %d (%d items): %f', round_num,
+                     n_used, end-start)
 
