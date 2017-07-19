@@ -288,23 +288,31 @@ def _chromosome_string_to_numeric_id(chrom):
     return chrom_id
 
 
-def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii, n_atoms):
-    def get_cluster_size(n, radii):
-        return 4 * np.sqrt(n - 1) * np.average(radii)
 
-    with h5py.File(cluster_file) as f:
-        cs = f['clusters_%d' % struct_i]['()']
-    i = 0
+def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii, n_atoms):
+    def cbrt(x):
+        return (x)**(1./3.)
+    def get_cluster_size(n, radii):
+        return 0.5 * cbrt(n - 1) * np.average(radii)
+
     centroids = []
-    while (i < len(cs)):
-        n = cs[i]
-        beads = cs[i+1:i+1+n]
-        csize = get_cluster_size(n, radii[beads])
-        bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
-        for b in beads:
-            bonds_container.add_bond(bt, len(centroids), b, BT.BARCODED_CLUSTER)    
-        centroids.append(np.mean(coord[beads], axis=0))
-        i += n + 1
+    with h5py.File(cluster_file) as f:
+        idxptr = f['indptr'][()]
+        structidx = f['assignment'][()]
+        (curr_clusters, ) = np.where(structidx == struct_i)
+        for cluster_id in curr_clusters:
+            start_pos = idxptr[cluster_id]
+            end_pos = idxptr[cluster_id + 1]
+            beads = f['data'][start_pos:end_pos][()]
+            csize = get_cluster_size(len(beads), radii[beads])
+            
+            # add a centroid for the cluster
+            centroid_pos = np.mean(coord[beads], axis=0)
+            bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
+            for b in beads:
+                bonds_container.add_bond(bt, len(centroids), b, BT.BARCODED_CLUSTER)    
+            centroids.append(centroid_pos)
+            
     return centroids
 
 
@@ -776,7 +784,7 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
     if args['bc_cluster'] is not None:
         if isinstance(args['bc_cluster'], string_types):
             centroids = _gen_bc_cluster_bonds(bond_list, args['bc_cluster'],
-                                              args['i'], bead_radii, 
+                                              args['i'], crd, bead_radii, 
                                               n_atoms + dummies.n_dummy)
             n_centroids = len(centroids)
     else:
@@ -879,6 +887,7 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
         print('group beads type <', dummy_type, file=f)
         print('group dummy type', dummy_type, file=f)
         print('group centroid type', centroid_type, file=f)
+        print('group integrate type', dummy_type, centroid_type, file=f)
 
         print('neighbor', max(bead_radii), 'bin', file=f)  # skin size
         print('neigh_modify every 1 check yes', file=f)
@@ -894,9 +903,9 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
 
         # Integration
         # select the integrator
-        print('fix 2 beads nve/limit', args['max_velocity'], file=f)
+        print('fix 2 integrate nve/limit', args['max_velocity'], file=f)
         # Impose a thermostat - Tstart Tstop tau_decorr seed
-        print('fix 3 beads langevin', args['tstart'], args['tstop'],
+        print('fix 3 integrate langevin', args['tstart'], args['tstop'],
               args['damp'], args['seed'], file=f)
         print('timestep', args['timestep'], file=f)
 
