@@ -33,7 +33,7 @@ from math import acos, sin, cos, pi
 
 from .myio import write_hms
 from .util import monitor_progress, pretty_tdelta
-from .dbio import DBStructFile
+from .network_coord_io import CoordServer, CoordClient
 
 
 __author__  = "Guido Polles"
@@ -67,7 +67,7 @@ def uniform_sphere(R):
     return numpy.array([x,y,z])
 
 
-def generate_territories(chrom, R=5000.0):
+def generate_territories(index, R=5000.0):
     '''
     Creates a single random structure with chromosome territories.
 
@@ -75,41 +75,30 @@ def generate_territories(chrom, R=5000.0):
     expected radius of a chromosome.
 
     Arguments:
-        chrom (iterable): the chromosome tag for each bead. Note that 
-            chromosome start and end are detected as changes in the 
-            tag sequence
-        R (float): radius of the cell
+        chrom : alabtools.utils.Index 
+            the bead index for the system.
+        R : float 
+            radius of the cell
     
     Returns:
-        numpy.array:
-            structure coordinates
+        numpy.array : structure coordinates
     '''
     
     # chromosome ends are detected when
     # the name is changed
-    if len(chrom) == 0: 
-        return None
-    n_chrom = 1
-    n_beads = [1]
-    n_tot = 1
-    for i in range(1, len(chrom)):
-        if chrom[i] != chrom[i-1]:
-            n_chrom += 1
-            n_beads.append(1)
-        else:
-            n_beads[-1] += 1
-        n_tot += 1
-
+    n_tot = len(index)
+    n_chrom = len(index.chrom_sizes)
+    
     crds = numpy.empty((n_tot, 3))
     # the radius of the chromosome is set as 75% of its
     # "volumetric sphere" one. This is totally arbitrary. 
     # Note: using float division of py3
-    chr_radii = [0.75 * R * (float(nb)/n_tot)**(1./3) for nb in n_beads]
+    chr_radii = [0.75 * R * (float(nb)/n_tot)**(1./3) for nb in index.chrom_sizes]
     crad = numpy.average(chr_radii)
     k = 0
     for i in range(n_chrom):    
         center = uniform_sphere(R - crad)
-        for j in range(n_beads[i]):
+        for j in range(index.chrom_sizes[i]):
             crds[k] = uniform_sphere(crad) + center
             k += 1
 
@@ -140,7 +129,16 @@ def _write_random_to_memmap(fname, chrom, i, R=5000.0):
     f.flush()
 
 
-def create_random_population_with_territories(radii, chrom, n_struct, prefix, ipp_client=None, dbfile=None, memmap=None):
+def _write_random_to_server(fname, index, i, R=5000.0):
+    from network_coord_io import CoordClient
+    crd = generate_territories(index, R=R)
+    with CoordClient(fname) as client:
+        client.set_struct(i, crd)
+
+
+from .myio import PopulationCrdFile
+from .network_coord_io import CoordServer, CoordClient
+def create_random_population_with_territories(path, index, n_struct, ipp_client=None):
     '''
     Creates a population of N = *n_struct* structures, each on a single hms file. 
     Each file path is determined as *<prefix>_<n>.hms* 
@@ -176,19 +174,9 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
         No exceptions raised directly.
     '''
     logger = logging.getLogger(__name__)
-
-    if dbfile is not None:
-        f = DBStructFile(dbfile, n_struct=n_struct, radii=radii,
-                         chrom=chrom)
-        f.add_group(prefix)
-        genfunc = partial(_write_random_to_db, dbfile, chrom, prefix)
-    elif memmap is not None:
-        # create and close memmap
-        f = numpy.memmap(memmap, mode='w+', dtype='float32', 
-                         shape=(n_struct, len(chrom), 3))
-        genfunc = partial(_write_random_to_memmap, memmap, chrom)
-    else:
-        genfunc = partial(_write_random_hms, radii, chrom, prefix)
+    Gb = 8
+    membytes = Gb*1024*1024*1024
+    n_bead = len(index)
 
 
     if ipp_client is None:
@@ -196,23 +184,36 @@ def create_random_population_with_territories(radii, chrom, n_struct, prefix, ip
         start = time.time()
         logger.info('create_random_population_with_territories():'
                     ' serial run started (%d structures)', n_struct)
-        for i in range(n_struct):
-            genfunc(i)
+            
+        with PopulationCrdFile(path, mode='w', shape=(n_struct, n_bead, 3), 
+                               max_memory=membytes) as p:
+            for i in range(n_struct):
+                crd = generate_territories(index)
+                p.set_struct(i, crd)
+
         end = time.time()
         logger.info('create_random_population_with_territories():'
                     ' serial run done. (timing: %s)', 
                     pretty_tdelta(end-start))
-    else:        
-        # cloudpickle is needed to send the partials
-        ipp_client[:].use_cloudpickle() 
-        logger.info('create_random_population_with_territories():'
-                    ' parallel run started on %d workers',
-                    len(ipp_client))
 
-        ar = ipp_client[:].map_async(genfunc, range(n_struct))
+    else:
+        # parallel run
+        with CoordServer(path, mode='w', shape=(n_struct, n_bead, 3), 
+                     max_memory=membytes) as cs:
+        
+            # cloudpickle is needed to send the partial
+            genfunc = partial(_write_random_to_server, path, index)
+            ipp_client[:].use_cloudpickle() 
+            logger.info('create_random_population_with_territories():'
+                        ' parallel run started on %d workers',
+                        len(ipp_client))
 
-        monitor_progress('create_random_population_with_territories()', ar)
+            ar = ipp_client[:].map_async(genfunc, range(n_struct))
 
-        logger.info('create_random_population_with_territories():'
-                    ' parallel run finished. (Total time: %s)',
-                    pretty_tdelta(ar.wall_time))
+            monitor_progress('create_random_population_with_territories()', ar)
+
+            logger.info('create_random_population_with_territories():'
+                        ' parallel run finished. (Total time: %s)',
+                        pretty_tdelta(ar.wall_time))
+            cs.close()
+

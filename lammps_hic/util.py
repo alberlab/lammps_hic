@@ -38,3 +38,23 @@ def set_remote_vals(direct_view, **kwargs):
         logger.debug('setting remote vals for %s:%s on %s', k, str(v), str(direct_view.targets))
         direct_view[k] = v 
 
+
+def chromosome_string_to_numeric_id(chrom):
+    '''
+    Transform a list of strings in numeric
+    ids (from 1 to N). Multiple chromosome copies
+    will have the same id
+    '''
+    chr_map = {}
+    chrom_id = []
+    hv = 0
+    for s in chrom:
+        z = s.replace('chr', '')
+        try:
+            n = chr_map[z]
+        except KeyError:
+            n = hv + 1
+            chr_map[z] = n
+            hv = n
+        chrom_id.append(n)
+    return chrom_id

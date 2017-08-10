@@ -44,13 +44,14 @@ actdist_shape = [('i', 'int32'), ('j', 'int32'), ('ad', 'float32'), ('plast', 'f
 
 def _get_copy_index(index):
     tmp_index = {}
-    for i, (chrom, start, end, _) in enumerate(index):
-        if (chrom, start, end) not in tmp_index:
-            tmp_index[(chrom, start, end)] = [i]
+    for i, v in enumerate(index):
+        locus = (int(v.chrom), int(v.start), int(v.end))
+        if locus not in tmp_index:
+            tmp_index[locus] = [i]
         else:
-            tmp_index[(chrom, start, end)] += [i]
+            tmp_index[locus] += [i]
     # use first index as a key
-    copy_index = {ii[0]: ii for ii in tmp_index}
+    copy_index = {ii[0]: ii for locus, ii in tmp_index.items()}
     return copy_index
 
 def get_sorted_coo_matrix(matrix_file, out_matrix_file, chunksize=int(1e7)):
@@ -129,12 +130,14 @@ def _compute_actdist(i, j, pwish, plast):
 
     ri, rj = radii[ii[0]], radii[jj[0]]
 
-    d_sq = np.empty((n_combinations, n_struct))    
+    d_sq = np.empty((n_combinations, n_struct))  
+    it = 0  
     for k in ii:
         for m in jj:
             x = coordinates[:, k, :]
             y = coordinates[:, m, :] 
-            d_sq[i] = np.sum(np.square(x - y), axis=1)
+            d_sq[it] = np.sum(np.square(x - y), axis=1)
+            it += 1
     
     pnow = 0
     rcutsq = np.square(2 * (ri + rj))
@@ -236,7 +239,9 @@ def get_actdists(parallel_client, hss_fname, matrix_memmap, crd_memmap,
     workers['copy_index'] = copy_index
     
     # opens actdists files
-    ad_in = gzip.open(actdist_file)
+    ad_in = None
+    if actdist_file is not None:
+        ad_in = gzip.open(actdist_file)
     ad_out = gzip.open(new_actdist_file, 'w')
 
     # opens probability matrix file
@@ -268,12 +273,13 @@ def get_actdists(parallel_client, hss_fname, matrix_memmap, crd_memmap,
 
         # read the last refined probabilities, if present
         old_ads = []
-        for line in islice(ad_in, n_used):
-            lsp = line.split()
-            i = int(lsp[0])
-            j = int(lsp[1])
-            p = int(lsp[3])
-            old_ads.append((i, j, p))
+        if ad_in is not None:
+            for line in islice(ad_in, n_used):
+                lsp = line.split()
+                i = int(lsp[0])
+                j = int(lsp[1])
+                p = int(lsp[3])
+                old_ads.append((i, j, p))
 
         n_ads = len(old_ads)
 

@@ -32,14 +32,14 @@ in the wrappers module.
 from __future__ import print_function, division
 import os
 import os.path
-import h5py
+import itertools
 import math
 import logging
 import numpy as np
-import concurrent.futures
 from numpy.linalg import norm
 from io import StringIO
 from six import string_types
+from myio import Violations
 
 from subprocess import Popen, PIPE
 try:
@@ -48,9 +48,15 @@ except ImportError:
     import pickle
 
 
-from .myio import read_hss, write_hss, read_full_actdist
+from .myio import read_hss, write_hss, read_full_actdist, HtfFile
 from .util import monitor_progress, pretty_tdelta
 from .globals import lammps_executable, float_epsilon
+from .restraints.consecutive_beads import apply_consecutive_beads_restraints 
+from .restraints.hic import apply_hic_restraints
+from .restraints.damid import apply_damid_restraints
+from .restraints.fish import apply_fish_restraints
+from .restraints.barcoded_clusters import apply_barcoded_cluster_restraints
+from .lammps_utils import *
 
 
 __author__  = "Guido Polles"
@@ -101,227 +107,266 @@ ARG_DEFAULT = {
 }
 
 
-class BT(object):
-    CONSECUTIVE = 0
-    HIC = 1
-    DAMID = 2
-    FISH_RADIAL = 3
-    FISH_PAIR = 4
-    BARCODED_CLUSTER = 5
+def validate_user_args(kwargs):
+    args = {k: v for k, v in ARG_DEFAULT.items()}
+    for k, v in kwargs.items():
+        if v is not None:
+            args[k] = v
+
+    if args['write'] is None:
+        args['write'] = args['mdsteps']  # write only final step
+    else:
+        # this is only because it may be passed as string
+        args['write'] = int(args['write'])
+
+    return args
 
 
-class BondType(object):
+def read_actdists(ad):
+    assert(ad is not None)
+    actdists = []
+    if isinstance(ad, str) or isinstance(ad, unicode):
+        if ad[-7:] == ".txt.gz":
+            import gzip
+            with gzip.open(ad) as f:
+                for line in f:
+                    try:
+                        i, j, pwish, d, p, pnow = line.split()
+                    except ValueError:
+                        continue
+                    actdists.append((int(i), int(j), pwish, float(d), p, pnow))
+        elif os.path.getsize(ad) > 0:
+            actdists = read_full_actdist(ad)
+    else:
+        actdists = ad
+    return actdists
+
+
+def read_damid(damid):
+    assert(damid is not None)
+    if isinstance(damid, str) or isinstance(damid, unicode):
+        if os.path.getsize(damid) > 0:
+            damid_actdists = np.genfromtxt(damid,
+                                           usecols=(0, 1, 2),
+                                           dtype=(int, float, float))
+            if damid_actdists.shape == ():
+                damid_actdists = [damid_actdists]
+        else:
+            damid_actdists = []
+    return damid_actdists
+
+
+def get_radii_to_atom_type_mapping(radii):
     '''
-    A bond type. The indexes are saved in
-    the *0, ... , N-1* index, while its string
-    representation is in the *1, ..., N* LAMMPS
-    format.
+    Compute the unique mapping between radii and atom types.
+
+    Parameters
+    ----------
+        radii : list of floats
+
+    Returns
+    -------
+        dict : the mapping radius -> atom type id 
     '''
-    def __init__(self, b_id, type_str, kspring, r0):
-        self.id = b_id
-        self.kspring = kspring
-        self.type_str = type_str
-        self.r0 = r0 
-
-    def __str__(self):
-        return '{} {} {} {}'.format(self.id + 1,
-                                    self.type_str,
-                                    self.kspring,
-                                    self.r0)
-
-    def __eq__(self, other): 
-        return (self.r0 == other.r0 and
-                self.kspring == other.kspring and
-                self.type_str == other.type_str)  
+    radius_to_atom_type = {}
+    at = 0
+    atom_types = np.empty(len(radii), dtype=int)
+    for i, r in enumerate(radii):
+        aid = radius_to_atom_type.get(r)
+        if aid is None:
+            at += 1
+            radius_to_atom_type[r] = at
+            aid = at
+        atom_types[i] = aid
+    return radius_to_atom_type
 
 
-    def __hash__(self):
-        return hash((self.r0, self.kspring, self.type_str))
-
-
-class Bond(object):
-    '''
-    A bond between two atoms. The indexes are saved in
-    the *0, ... , N-1* index, while its string
-    representation is in the *1, ..., N* LAMMPS
-    format.
-    '''
-    def __init__(self, b_id, bond_type, i, j):
-        self.id = b_id
-        self.bond_type = bond_type
-        self.i = i
-        self.j = j
-
-    def __str__(self):
-        return '{} {} {} {}'.format(self.id + 1,
-                                    self.bond_type + 1,
-                                    self.i + 1,
-                                    self.j + 1)
-
-    def __eq__(self, other): 
-        return self.__dict__ == other.__dict__
-
-
-class BondContainer(object):
-    '''
-    A container to avoid keeping track of ids and duplicates.
-    The dictionary for the types is to avoid re-use of 
-    bond_types.
+def create_lammps_data(system, index, user_args):
+    radii = [a.radius for a in system.atoms]
+    radius_to_atom_type = get_radii_to_atom_type_mapping(radii)
     
-    This way, the check should be amortized O(1)
-    '''
-    def __init__(self):
-        self.bond_types = []
-        self.bonds = []
-        self.bond_type_dict = {}
-        self.bond_annotations = []
+    n_atom_types = len(radius_to_atom_type)
+    n_bonds = len(system.bonds)
+    n_bondtypes = len(system.bond_parms)
+    n_atoms = len(system.atoms)
 
-    def add_type(self, type_str, kspring=0.0, r0=0.0):
-        '''
-        Add a bond type.
+    # generate molecule IDs
+    molids = [0] * len(index)
+    last_molid = 0
+    last_chr = -1
+    n_mol = 0
+    for i in range(len(index)):
+        if last_chr != index.chrom[i]:
+            n_mol += 1
+            last_molid += 1
+        molids[i] = last_molid
+        last_chr = index.chrom[i]
 
-        :Arguments:
-            *type_str*
-                Either 'harmonic_upper_bound' or 'harmonic_lower_bound'
+    with open(user_args['data'], 'w') as f:
 
-            *kspring*
-                Spring constant
+        print('LAMMPS input\n', file=f)
 
-            *r0*
-                Activation distance (center to center)
+        print(n_atoms, 'atoms\n', file=f)
+        print(n_atom_types, 'atom types\n', file=f)
+        print(n_bondtypes, 'bond types\n', file=f)
+        print(n_bonds, 'bonds\n', file=f)
 
-        :Outputs:
-            *bt*
-                The corresponding BondType instance  
-        '''
-        bt = BondType(len(self.bond_types),
-                      type_str,
-                      kspring,
-                      r0)
+        # keeping some free space to be sure
+        print('-6000 6000 xlo xhi\n',
+              '-6000 6000 ylo yhi\n',
+              '-6000 6000 zlo zhi', file=f)
 
-        old_id = self.bond_type_dict.get(bt)
-        if old_id is None:
-            self.bond_types.append(bt)
-            self.bond_type_dict[bt] = bt.id
-            return bt
-        else: 
-            return self.bond_types[old_id]
+        print('\nAtoms\n', file=f)
+        # index, molecule, atom type, x y z.
+        for i, atom in enumerate(system.atoms):
+            x, y, z = atom.crd
+            atype = radius_to_atom_type[atom.radius]
+            if i < len(index):
+                molid = molids[i]
+            else:
+                molid = n_mol + 1
 
-    def add_bond(self, bond_type, i, j, annotation=None):
-        '''
-        Add a bond of type *bond_type* between *i* and *j* beads
+            print(atom.id, molid, atype, x, y, z, file=f)
+        
+        # bonds
+        # Harmonic Upper Bond Coefficients are one for each bond type
+        # and coded as:
+        #   Bond_type_id kspring activation_distance
+        # Each bond is coded as:
+        #   Bond_id Bond_type_id ibead jbead
 
-        Arguments:
-            bond_type (lammps_hic.lammps.BondType): a BondType instance 
-                returned by the add_type function
-            i (int): Integer index of the first bound bead
-            j (int): Integer index of the second bound bead
-            annotation (optional): appends any annotation needed for
-                future use
-        '''
-        bond = Bond(len(self.bonds),
-                    bond_type.id,
-                    i,
-                    j)
-        self.bonds.append(bond)
-        self.bond_annotations.append(annotation)
-        return bond
+        print('\nBond Coeffs\n', file=f)
+        for i, params in enumerate(system.bond_parms):
+            params['id'] = i + 1 
+            print(params['id'], type_string[params['style']], params['k'], 
+                  params['r'], file=f)
 
+        print('\nBonds\n', file=f)
+        for i, bond in enumerate(system.bonds):
+            print(i + 1, bond.bond_params['id'], bond.i.id, bond.j.id, file=f)
 
-class DummyAtoms(object):
-    '''
-    The dummy atoms class is used to keep track of dummy atoms.
+        # Excluded volume coefficients
+        atom_radii = [r for r in sorted(radius_to_atom_type, key=radius_to_atom_type.__getitem__)]
 
-    They are usually connected to multiple atoms (to enforce, 
-    for example, some distance from the cell center).
-    If we use
-    the same atom for too many bonds, the dummy atom will set the
-    max_bonds parameter for all atoms to a very large number,
-    letting memory usage explode.
+        print('\nPairIJ Coeffs\n', file=f)
+        for i, ri in enumerate(atom_radii):
+            for j in range(i, len(atom_radii)):
+                rj = atom_radii[j] 
+                if ri*rj == 0 :
+                    dc = 0
+                else:
+                    dc = (ri + rj)
+                A = (dc/math.pi)**2
+                #sigma = dc / 1.1224 #(2**(1.0/6.0))
+                #print(i+1, user_args['evfactor'], sigma, dc, file=f)
+                print(i+1, j+1, A*user_args['evfactor'], dc, file=f)
+        
 
-    The solution is to have multiple dummy atoms and
-    use a single atom only for a limited number of
-    bonds.
+def create_lammps_script(system, index, user_args):
+    radii = [a.radius for a in system.atoms]
+    radius_to_atom_type = get_radii_to_atom_type_mapping(radii)
 
-    DummyAtoms.next() returns the same dummy atom id for 
-    *DummyAtom.max_bonds* (default is 10) times, then updates
-    the number of dummy atoms, making the new atom the 
-    current one. 
+    with open(user_args['lmp'], 'w') as f:
+        print('units                 lj', file=f)
+        print('atom_style            bond', file=f)
+        print('bond_style  hybrid',
+              'harmonic_upper_bound',
+              'harmonic_lower_bound', file=f)
+        print('boundary              f f f', file=f)
 
-    :Constructor Arguments:
-        *n_atoms*
-            The number of real atoms in the system.
-
-    '''
-    max_bonds = 10
-
-    def __init__(self, n_atoms):
-        self.n_atoms = n_atoms
-        self.counter = 0
-        self.n_dummy = 0
-
-    def next(self):
-        if self.counter % DummyAtoms.max_bonds == 0:
-            self.n_dummy += 1
-        self.counter += 1
-        return self.n_dummy + self.n_atoms - 1
+        # Needed to avoid calculation of 3 neighs and 4 neighs
+        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
 
 
-def _chromosome_string_to_numeric_id(chrom):
-    '''
-    Transform a list of strings in numeric
-    ids (from 1 to N). Multiple chromosome copies
-    will have the same id
-    '''
-    chr_map = {}
-    chrom_id = []
-    hv = 0
-    for s in chrom:
-        z = s.replace('chr', '')
-        try:
-            n = chr_map[z]
-        except KeyError:
-            n = hv + 1
-            chr_map[z] = n
-            hv = n
-        chrom_id.append(n)
-    return chrom_id
+        # excluded volume
+        print('pair_style soft', 2.0 * max(radii), file=f)  # global cutoff
+
+        print('read_data', user_args['data'], file=f)
+        print('mass * 1.0', file=f)
+
+        print('group beads type <=', len(index), file=f)
+        frozen_ids = [atom.id for atom in system.atoms if atom.frozen]
+        if frozen_ids:
+            print('group frozen id', ' '.join(frozen_ids) , file=f)
+        phantom_type = radius_to_atom_type.get(0.0, None)
+        if phantom_type:
+            print('group phantom type', phantom_type, file=f)
+
+        print('neighbor', max(radii), 'bin', file=f)  # skin size
+        print('neigh_modify every 1 check yes', file=f)
+        print('neigh_modify one', user_args['max_neigh'],
+              'page', 20 * user_args['max_neigh'], file=f)
+
+        # exclude neighbor interactions for non beads
+        if phantom_type:
+            print('neigh_modify exclude group phantom all', file=f)
+        
+        # Freeze dummy atom
+        if frozen_ids:
+            print('fix 1 frozen setforce 0.0 0.0 0.0', file=f)
+
+        # Integration
+        # select the integrator
+        print('fix 2 beads nve/limit', user_args['max_velocity'], file=f)
+        # Impose a thermostat - Tstart Tstop tau_decorr seed
+        print('fix 3 beads langevin', user_args['tstart'], user_args['tstop'],
+              user_args['damp'], user_args['seed'], file=f)
+        print('timestep', user_args['timestep'], file=f)
+
+        # Region
+        print('region mySphere sphere 0.0 0.0 0.0',
+              user_args['nucleus_radius'] + 2 * max(radii), file=f)
+        print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
+              2 * max(radii), file=f)
+
+        #print('pair_modify shift yes mix arithmetic', file=f)
+
+        # outputs:
+        print('dump   id beads custom',
+              user_args['write'],
+              user_args['out'],
+              'id type x y z fx fy fz', file=f)
+
+        # Thermodynamic info style for output
+        print('thermo_style custom step temp epair ebond', file=f)
+        print('thermo', user_args['thermo'], file=f)
+
+        # ramp excluded volume
+        if user_args['ev_step'] > 1:
+            ev_val_step = float(user_args['ev_stop'] - user_args['ev_start']) / (user_args['ev_step'] - 1)
+            for step in range(user_args['ev_step']):
+                print('variable evprefactor equal ',
+                      user_args['ev_start'] + ev_val_step*step,
+                      file=f)
+                #'ramp(%f,%f)' % (user_args['ev_start'], user_args['ev_stop']),
+                print('fix %d all adapt 0',
+                      'pair soft a * * v_evprefactor scale yes',
+                      'reset yes' % 4 + step, file=f)
+                print('run', user_args['mdsteps'], file=f)
+                print('unfix 4', file=f)
+        else:
+        # Run MD
+            print('run', user_args['mdsteps'], file=f)
+
+        # Run CG
+        print('min_style cg', file=f)
+        print('minimize', user_args['etol'], user_args['ftol'],
+              user_args['max_cg_iter'], user_args['max_cg_eval'], file=f)
 
 
-def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii, n_atoms):
-    def get_cluster_size(n, radii):
-        return 4 * np.sqrt(n - 1) * np.average(radii)
-
-    with h5py.File(cluster_file) as f:
-        cs = f['clusters_%d' % struct_i]['()']
-    i = 0
-    centroids = []
-    while (i < len(cs)):
-        n = cs[i]
-        beads = cs[i+1:i+1+n]
-        csize = get_cluster_size(n, radii[beads])
-        bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
-        for b in beads:
-            bonds_container.add_bond(bt, len(centroids), b, BT.BARCODED_CLUSTER)    
-        centroids.append(np.mean(coord[beads], axis=0))
-        i += n + 1
-    return centroids
-
-
-def generate_input(crd, bead_radii, chrom, **kwargs):
+def generate_input(crd, radii, index, **kwargs):
     '''
     This function generate two input files for
     the LAMMPS executable.
 
-    :Arguments:
-        *crd (numpy ndarray)*
+    Parameters
+    ----------
+        crd : np.ndarray
             Starting bead coordinates
-
-        *bead_radii (array or list of floats)*
+        radii : np.ndarray or list of floats
             Radius of each bead in the system
-
-        *chrom (array or list of strings)*
-            Chromosome tag for each bead
+        index : alabtools.Index
+            alabtools.Index instance for the system
         
     :Additional keyword arguments:
         *nucleus_radius (default=5000.0)*
@@ -470,481 +515,43 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
         *bond_list (lammps_hic.lammps.BondContainer)*
             List of all added bonds  
     '''
-    import numpy as np
+    assert (len(index) == len(crd) == len(radii))
 
-    args = {k: v for k, v in ARG_DEFAULT.items()}
-    for k, v in kwargs.items():
-        if v is not None:
-            args[k] = v
+    n_genome_beads = len(index)
 
-    if args['write'] is None:
-        args['write'] = args['mdsteps']  # write only final step
-    else:
-        # this is only because it may be passed as string
-        args['write'] = int(args['write'])
+    args = validate_user_args(kwargs)
 
-    chromid = _chromosome_string_to_numeric_id(chrom)
-
-    n_hapl = len(crd) // 2
-    n_atoms = len(crd)
-    x1 = crd[:n_hapl]
-    x2 = crd[n_hapl:]
-    assert (len(x1) == len(x2))
-
-    # Harmonic Upper Bond Coefficients are one for each bond type
-    # and coded as:
-    #   Bond_type_id kspring activation_distance
-    # Each bond is coded as:
-    #   Bond_id Bond_type_id ibead jbead
-
-    bond_list = BondContainer()
-    dummies = DummyAtoms(n_atoms)
-
-    # first, determine atom types by radius
-    atom_types_ids = {}
-    at = 0
-    atom_types = np.empty(n_atoms, dtype=int)
-    for i, r in enumerate(bead_radii):
-        aid = atom_types_ids.get(r)
-        if aid == None:
-            at += 1
-            atom_types_ids[r] = at
-            aid = at
-        atom_types[i] = aid
-    n_bead_types = len(atom_types_ids)
-
-    ###############################
-    # Add consecutive beads bonds #
-    ###############################
-
-    for i in range(n_atoms - 1):
-        if chrom[i] == chrom[i + 1]:
-            bt = bond_list.add_type('harmonic_upper_bound', 
-                                    kspring=1.0, 
-                                    r0=2*(bead_radii[i]+bead_radii[i+1]))
-            bond_list.add_bond(bt, i, i + 1, BT.CONSECUTIVE)
-
-    ##############################
-    # Add chromosome territories #
-    ##############################
-
-    if args['territories']:
-        # for the territories step we want to make chromosomes very dense (3x?)
-        terr_occupancy = args['occupancy'] * 3
-        chrom_start = [0]
-        for i in range(1, n_atoms):
-            if chrom[i] != chrom[i - 1]:
-                chrom_start.append(i)
-        chrom_start.append(n_atoms)
-        for k in range(len(chrom_start) - 1):
-            nnbnds = 0
-            chrom_len = chrom_start[k + 1] - chrom_start[k]
-            chr_radii = bead_radii[chrom_start[k]:chrom_start[k + 1]]
-            d = 4.0 * sum(chr_radii) / chrom_len  # 4 times the average radius
-            d *= (float(chrom_len) / terr_occupancy)**(1. / 3)
-            bt = bond_list.add_type('harmonic_upper_bound',
-                                    kspring=1.0,
-                                    r0=d)
-            for i in range(chrom_start[k], chrom_start[k + 1], args['territories']):
-                for j in range(i + args['territories'], chrom_start[k + 1], args['territories']):
-                    bond_list.add_bond(bt, i, j)
-                    nnbnds += 1
-
-    ##############################################
-    # Activation distance for contact restraints #
-    ##############################################
-    # NOTE: activation distances are surface to surface, not center to center
-    # The old method was using minimum pairs
-    # Here we enforce a single pair.
+    system = LammpsSystem()
+    
+    # create an atom for each genome bead
+    for i in range(n_genome_beads):
+        system.add_atom(crd[i], radii[i])
+    
+    apply_consecutive_beads_restraints(system, index, radii, args)
+    
     if args['actdist'] is not None:
-        if isinstance(args['actdist'], str) or isinstance(args['actdist'], unicode):
-            if os.path.getsize(args['actdist']) > 0:
-                actdists = read_full_actdist(args['actdist'])
-            else:
-                actdists = []
-        else:
-            actdists = args['actdist']
-
-        for (i, j, pwish, d, p, pnow) in actdists:
-            cd = np.zeros(4)
-            rsph = bead_radii[i] + bead_radii[j]
-            dcc = d + rsph  # center to center distance
-
-            cd[0] = norm(x1[i] - x1[j])
-            cd[1] = norm(x2[i] - x2[j])
-            cd[2] = norm(x1[i] - x2[j])
-            cd[3] = norm(x2[i] - x1[j])
-
-            # find closest distance and remove incompatible contacts
-            idx = np.argsort(cd)
-
-            if cd[idx[0]] > dcc:
-                continue
-
-            # we have at least one bond to enforce
-            bt = bond_list.add_type('harmonic_upper_bound',
-                                    kspring=args['contact_kspring'],
-                                    r0=args['contact_range'] * rsph)
-
-            if idx[0] == 0 or idx[0] == 1:
-                cd[2] = np.inf
-                cd[3] = np.inf
-            else:
-                cd[0] = np.inf
-                cd[1] = np.inf
-
-            # add bonds
-            if cd[0] < dcc:
-                bond_list.add_bond(bt, i, j, BT.HIC)
-            if cd[1] < dcc:
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl, BT.HIC)
-            if cd[2] < dcc:
-                bond_list.add_bond(bt, i, j + n_hapl, BT.HIC)
-            if cd[3] < dcc:
-                bond_list.add_bond(bt, i + n_hapl, j, BT.HIC)
-
-    #############################################
-    # Activation distances for damid restraints #
-    #############################################
+        actdist = read_actdists(args['actdist'])
+        apply_hic_restraints(system, crd, radii, index, actdist, args)
 
     if args['damid'] is not None:
-        if isinstance(args['damid'], str) or isinstance(args['damid'], unicode):
-            if os.path.getsize(args['damid']) > 0:
-                damid_actdists = np.genfromtxt(args['damid'],
-                                               usecols=(0, 1, 2),
-                                               dtype=(int, float, float))
-                if damid_actdists.shape == ():
-                    damid_actdists = [damid_actdists]
-            else:
-                damid_actdists = []
-
-        for item in damid_actdists:
-            i = item[0]
-            d = item[2]
-            # target minimum distance
-            td = args['nucleus_radius'] - (2 * bead_radii[i])
-
-            # current distances
-            cd = np.zeros(2)
-            cd[0] = args['nucleus_radius'] - norm(x1[i])
-            cd[1] = args['nucleus_radius'] - norm(x2[i])
-
-            idx = np.argsort(cd)
-
-            if cd[idx[0]] > d:
-                continue
-
-            # we have at least one bond to enforce
-            bt = bond_list.add_type('harmonic_lower_bound',
-                                    kspring=args['damid_kspring'],
-                                    r0=td)
-
-            # add bonds
-            if cd[0] < d:
-                bond_list.add_bond(bt, i, dummies.next(), BT.DAMID)
-            if cd[1] < d:
-                bond_list.add_bond(bt, i + n_hapl, dummies.next(), BT.DAMID)
-
-    ###############################################
-    # Add bonds for fish restraints, if specified #
-    ###############################################
+        damid_ad = read_damid(args['damid'])
+        apply_damid_restraints(system, crd, radii, index, damid_ad, args)
 
     if args['fish'] is not None:
-        hff = h5py.File(args['fish'], 'r')
-        minradial = 'r' in args['fish_type']
-        maxradial = 'R' in args['fish_type']
-        minpair = 'p' in args['fish_type']
-        maxpair = 'P' in args['fish_type']
-
-        if minradial:
-            cd = np.zeros(2)
-            probes = hff['probes']
-            minradial_dist = hff['radial_min'][:, args['i']]
-            for k, i in enumerate(probes):
-                td = minradial_dist[k]
-                cd[0] = norm(x1[i])
-                cd[1] = norm(x2[i])
-                if cd[0] < cd[1]:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, td - args['fish_tol']))
-                bond_list.add_bond(bt, ii, dummies.next(), BT.FISH_RADIAL)
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=td + args['fish_tol'])
-                bond_list.add_bond(bt, ii, dummies.next(), BT.FISH_RADIAL)
-
-        if maxradial:
-            cd = np.zeros(2)
-            probes = hff['probes']
-            maxradial_dist = hff['radial_max'][:, args['i']]
-            for k, i in enumerate(probes):
-                td = maxradial_dist[k]
-                cd[0] = norm(x1[i])
-                cd[1] = norm(x2[i])
-                if cd[0] > cd[1]:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=td + args['fish_tol'])
-                bond_list.add_bond(bt, ii, dummies.next(), BT.FISH_RADIAL)
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, td - args['fish_tol']))
-                bond_list.add_bond(bt, ii, dummies.next(), BT.FISH_RADIAL)
-
-        if minpair:
-            pairs = hff['pairs']
-            minpair_dist = hff['pair_min'][:, args['i']]
-            for k, (i, j) in enumerate(pairs):
-                dmin = minpair_dist[k]
-
-                cd = np.zeros(4)
-                cd[0] = norm(x1[i] - x1[j])
-                cd[1] = norm(x2[i] - x2[j])
-                cd[2] = norm(x1[i] - x2[j])
-                cd[3] = norm(x2[i] - x1[j])
-
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, dmin - args['fish_tol']))
-                bond_list.add_bond(bt, i, j, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i, j + n_hapl, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i + n_hapl, j, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl, BT.FISH_PAIR)
-
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=dmin + args['fish_tol'])
-                idx = np.argsort(cd)
-
-                if idx[0] == 0 or idx[0] == 2:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                if idx[0] == 0 or idx[0] == 3:
-                    jj = j
-                else:
-                    jj = j + n_hapl
-                bond_list.add_bond(bt, ii, jj)
-
-        if maxpair:
-            pairs = hff['pairs']
-            maxpair_dist = hff['pair_max'][:, args['i']]
-            for k, (i, j) in enumerate(pairs):
-                dmax = maxpair_dist[k]
-
-                cd = np.zeros(4)
-                cd[0] = norm(x1[i] - x1[j])
-                cd[1] = norm(x2[i] - x2[j])
-                cd[2] = norm(x1[i] - x2[j])
-                cd[3] = norm(x2[i] - x1[j])
-
-                bt = bond_list.add_type('harmonic_upper_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=dmax + args['fish_tol'])
-                bond_list.add_bond(bt, i, j, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i, j + n_hapl, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i + n_hapl, j, BT.FISH_PAIR)
-                bond_list.add_bond(bt, i + n_hapl, j + n_hapl, BT.FISH_PAIR)
-
-                bt = bond_list.add_type('harmonic_lower_bound',
-                                        kspring=args['fish_kspring'],
-                                        r0=max(0, dmax - args['fish_tol']))
-                idx = np.argsort(cd)
-                if idx[-1] == 0 or idx[-1] == 2:
-                    ii = i
-                else:
-                    ii = i + n_hapl
-                if idx[-1] == 0 or idx[-1] == 3:
-                    jj = j
-                else:
-                    jj = j + n_hapl
-                bond_list.add_bond(bt, ii, jj)
-        hff.close()
-
-
-    ################################
-    # Barcoded clusters restraints #
-    ################################
+        apply_fish_restraints(system, crd, index, args)
 
     if args['bc_cluster'] is not None:
-        if isinstance(args['bc_cluster'], string_types):
-            centroids = _gen_bc_cluster_bonds(bond_list, args['bc_cluster'],
-                                              args['i'], bead_radii, 
-                                              n_atoms + dummies.n_dummy)
-            n_centroids = len(centroids)
-    else:
-        centroids = []
-        n_centroids = 0
+        apply_barcoded_cluster_restraints(system, coord, radii, 
+                                          args['bc_cluster'], args)
 
-    ############################
-    # Create LAMMPS input file #
-    ############################
+    create_lammps_data(system, index, args)
+    create_lammps_script(system, index, args)
 
-    n_bonds = len(bond_list.bonds)
-    n_bondtypes = len(bond_list.bond_types)
-    dummy_type = n_bead_types + 1
-    centroid_type = dummy_type + 1
-    n_total_beads = n_atoms + dummies.n_dummy + n_centroids
-
-    with open(args['data'], 'w') as f:
-
-        print('LAMMPS input\n', file=f)
-
-        print(n_total_beads, 'atoms\n', file=f)
-        print(centroid_type, 'atom types\n', file=f)
-        print(n_bondtypes, 'bond types\n', file=f)
-        print(n_bonds, 'bonds\n', file=f)
-
-        # keeping some free space to be sure
-        print('-6000 6000 xlo xhi\n',
-              '-6000 6000 ylo yhi\n',
-              '-6000 6000 zlo zhi', file=f)
-
-        print('\nAtoms\n', file=f)
-        # index, molecule, atom type, x y z.
-        for i, (x, y, z) in enumerate(crd):
-            print(i + 1, chromid[i], atom_types[i], x, y, z, file=f)
-        
-        # dummy atoms in the middle
-        dummy_mol = max(chromid) + 1
-        for i in range(dummies.n_dummy):
-            print(n_atoms + i + 1, dummy_mol, dummy_type, 0, 0, 0, file=f)
-
-        # centroids
-        centroid_mol = dummy_mol + 1
-        for i, (x, y, z) in enumerate(centroids):
-            idx = n_atoms + dummies.n_dummy + 1 + i
-            print(idx, centroid_mol, centroid_type, x, y, z, file=f)
-
-        # bonds
-        print('\nBond Coeffs\n', file=f)
-        for bc in bond_list.bond_types:
-            print(bc, file=f)
-
-        print('\nBonds\n', file=f)
-        for b in bond_list.bonds:
-            print(b, file=f)
-
-        # Excluded volume coefficients
-        all_atoms_radii = [x for x in sorted(atom_types_ids, key=atom_types_ids.__getitem__)]
-
-        print('\nPairIJ Coeffs\n', file=f)
-        for i, ri in enumerate(all_atoms_radii):
-            for j in range(i, len(all_atoms_radii)):
-                rj = all_atoms_radii[j] 
-                dc = (ri + rj)
-                A = (dc/math.pi)**2
-                #sigma = dc / 1.1224 #(2**(1.0/6.0))
-                #print(i+1, args['evfactor'], sigma, dc, file=f)
-                print(i+1, j+1, A*args['evfactor'], dc, file=f)
-        
-        # dummies do not have excluded volume
-        for i in range(len(all_atoms_radii) + 1):
-            print(i+1, dummy_type, 0, 0, file=f)
-
-        # centroids do not have excluded volume
-        for i in range(len(all_atoms_radii) + 2):
-            print(i+1, centroid_type, 0, 0, file=f)
-
-
-    ##########################
-    # Create lmp script file #
-    ##########################
-
-    with open(args['lmp'], 'w') as f:
-        print('units                 lj', file=f)
-        print('atom_style            bond', file=f)
-        print('bond_style  hybrid',
-              'harmonic_upper_bound',
-              'harmonic_lower_bound', file=f)
-        print('boundary              f f f', file=f)
-
-        # Needed to avoid calculation of 3 neighs and 4 neighs
-        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
-
-
-        # excluded volume
-        print('pair_style soft', 2.0 * max(bead_radii), file=f)  # global cutoff
-
-        print('read_data', args['data'], file=f)
-        print('mass * 1.0', file=f)
-
-        print('group beads type <', dummy_type, file=f)
-        print('group dummy type', dummy_type, file=f)
-        print('group centroid type', centroid_type, file=f)
-
-        print('neighbor', max(bead_radii), 'bin', file=f)  # skin size
-        print('neigh_modify every 1 check yes', file=f)
-        print('neigh_modify one', args['max_neigh'],
-              'page', 20 * args['max_neigh'], file=f)
-
-        # exclude neighbor interactions for non beads
-        print('neigh_modify exclude group dummy all', file=f)
-        print('neigh_modify exclude group centroid all', file=f)
-
-        # Freeze dummy atom
-        print('fix 1 dummy setforce 0.0 0.0 0.0', file=f)
-
-        # Integration
-        # select the integrator
-        print('fix 2 beads nve/limit', args['max_velocity'], file=f)
-        # Impose a thermostat - Tstart Tstop tau_decorr seed
-        print('fix 3 beads langevin', args['tstart'], args['tstop'],
-              args['damp'], args['seed'], file=f)
-        print('timestep', args['timestep'], file=f)
-
-        # Region
-        print('region mySphere sphere 0.0 0.0 0.0',
-              args['nucleus_radius'] + 2 * max(bead_radii), file=f)
-        print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
-              2 * max(bead_radii), file=f)
-
-        #print('pair_modify shift yes mix arithmetic', file=f)
-
-        # outputs:
-        print('dump   id beads custom',
-              args['write'],
-              args['out'],
-              'id type x y z fx fy fz', file=f)
-
-        # Thermodynamic info style for output
-        print('thermo_style custom step temp epair ebond', file=f)
-        print('thermo', args['thermo'], file=f)
-
-        # ramp excluded volume
-        if args['ev_step'] > 1:
-            ev_val_step = float(args['ev_stop'] - args['ev_start']) / (args['ev_step'] - 1)
-            for step in range(args['ev_step']):
-                print('variable evprefactor equal ',
-                      args['ev_start'] + ev_val_step*step,
-                      file=f)
-                #'ramp(%f,%f)' % (args['ev_start'], args['ev_stop']),
-                print('fix 4 all adapt 0',
-                      'pair soft a * * v_evprefactor scale yes',
-                      'reset yes', file=f)
-                print('run', args['mdsteps'], file=f)
-                print('unfix 4', file=f)
-        else:
-        # Run MD
-            print('run', args['mdsteps'], file=f)
-
-        # Run CG
-        print('min_style cg', file=f)
-        print('minimize', args['etol'], args['ftol'],
-              args['max_cg_iter'], args['max_cg_eval'], file=f)
-
-    return bond_list
+    return system
 
 
 def _check_violations(bond_list, crd):
-    violations = []
+    violations = Violations()
     for bond_no, bond in enumerate(bond_list.bonds):
         bt = bond_list.bond_types[bond.bond_type]
         d = norm(crd[bond.i] - crd[bond.j])
@@ -953,13 +560,13 @@ def _check_violations(bond_list, crd):
                 absv = d - bt.r0
                 relv = (d - bt.r0) / bt.r0
                 if relv > 0.05:
-                    violations.append((bond.i, bond.j, absv, relv, str(bond_list.bond_annotations[bond_no])))
+                    violations.add(bond.i, bond.j, absv, relv, bond_list.bond_annotations[bond_no])
         if bt.type_str == 'harmonic_lower_bound':
             if d < bt.r0:
                 absv = bt.r0 - d
                 relv = (bt.r0 - d) / bt.r0
                 if relv > 0.05:
-                    violations.append((bond.i, bond.j, absv, relv, str(bond_list.bond_annotations[bond_no])))
+                    violations.add(bond.i, bond.j, absv, relv, bond_list.bond_annotations[bond_no])
     return violations
 
 
@@ -1046,7 +653,17 @@ def get_last_frame(fh):
     return crds
 
 
-def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
+def mark_complete(i, fname):
+    '''
+    marks a minimization as completed
+    '''
+    dtype = np.int32
+    with open(fname, 'r+b') as f:
+        f.seek(i*dtype.itemsize)
+        np.int32(1).tofile(f)
+
+
+def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
     '''
     Actual minimization wrapper.
     
@@ -1125,7 +742,7 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
         # prepare input
         opts = {'out': traj_fname, 'data': data_fname, 'lmp': script_fname}
         kwargs.update(opts)
-        bond_list = generate_input(crd, radii, chrom, **kwargs)
+        system = generate_input(crd, radii, index, **kwargs)
 
         # run the lammps minimization
         with open(script_fname, 'r') as lamfile:
@@ -1142,8 +759,9 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
 
         # get results
         info = get_info_from_log(StringIO(unicode(output)))
-        info['n_restr'] = len(bond_list.bonds)
-        info['n_hic_restr'] = len([1 for a in bond_list.bond_annotations if a == BT.HIC])
+        info['n_restr'] = len(system.bonds)
+        info['n_hic_restr'] = len([1 for b in system.bonds 
+                                   if b.restraint_type == BT.HIC])
         
         with open(traj_fname, 'r') as fd:
             new_crd = get_last_frame(fd)
@@ -1164,10 +782,9 @@ def lammps_minimize(crd, radii, chrom, run_name, tmp_files_dir='/dev/shm', log_d
             os.remove(traj_fname)
         raise
 
-
     if check_violations:
         if info['bond-energy'] > float_epsilon:
-            violations = _check_violations(bond_list, new_crd)
+            violations = _check_violations(system, new_crd)
         else: 
             violations = []
         return new_crd, info, violations
@@ -1284,9 +901,9 @@ def bulk_minimize(parallel_client,
         raise
 
     
-def _serial_lammps_call(iargs):
+def _serial_lammps_call_net(iargs):
     '''
-    Serial function to be mapped in parallel.
+    Serial function to be mapped in parallel. //
     It is intended to be used only internally by parallel routines.
 
     Parameters
@@ -1310,36 +927,154 @@ def _serial_lammps_call(iargs):
             - n_violations (int): Number of violated restraint at the end of 
                 minimization. 
     '''
- 
+
+    try:
+        # importing here so it will be called on the parallel workers
+        import json
+        import traceback
+        from .network_coord_io import CoordClient
+        from alabtools.utils import HssFile
+        
+        # unpack arguments
+        param_fname, struct_id = iargs
+        with open(param_fname) as f:
+            kwargs = json.load(f)
+        
+        input_hss = kwargs.pop('input_hss')
+        input_crd = kwargs.pop('input_crd')
+        output_crd = kwargs.pop('output_crd')
+        run_name = kwargs.pop('run_name')
+        status_annotations = '.' + output_crd + '.status'
+
+        # read file
+        with HssFile(input_hss, 'r') as f:
+            radii = f.radii
+            index = f.index
+
+        with CoordClient(input_crd) as f:
+            crd = f.get_struct(i)
+        
+        # perform minimization
+        new_crd, info, violations = lammps_minimize(crd, radii, index, run_name, **kwargs)
+        
+        with CoordClient(output_crd) as f:
+            f.set_struct(i, new_crd)
+
+        mark_complete(i, status_annotations)
+
+        return (0, info, len(violations))
+
+    except:
+        import sys
+        etype, value, tb = sys.exc_info()
+        infostr = ''.join(traceback.format_exception(etype, value, tb))
+        return (None, infostr, 0)
+
+
+
+def _serial_lammps_call(iargs):
+    '''
+    Serial function to be mapped in parallel. //
+    It is intended to be used only internally by parallel routines.
+
+    Parameters
+    ---------- 
+        iargs (tuple): contains the following items:
+            - fname_from (string): the path to the memory map containing the
+                original coordinates
+            - fname_to (string): the path to the memory map containing the 
+                final coordinates
+            - fname_param (string): the path to the parameters file
+            - struct_id (int): the id of the structure to perform the
+                minimization on
+    
+    Returns
+    -------
+        oargs (tuple): contains the following items:
+            - returncode (int): 0 if success, None otherwise
+            - info (dict): dictionary of info returned by lammps_minimize. 
+                If the run fails, info is set to the formatted traceback
+                string
+            - n_violations (int): Number of violated restraint at the end of 
+                minimization. 
+    '''
+
     try:
         # importing here so it will be called on the parallel workers
         import json
         import traceback
         import os
-        import os.path
-        from .myio import read_hms, write_hms
+        from os.path import splitext, basename
+        from .myio import read_hms, write_hms, HtfFile
+        from alabtools.utils import HssFile
+        from lazyio import PopulationCrdFile
         
         # unpack arguments
-        fname, param_fname, new_fname = largs
-        run_name = os.path.splitext(os.path.basename(new_fname))[0]
+        xin, param_fname, xout, run_name = iargs
+        
+        if isinstance(xin, str):
+            # for bw compatibility
+            crd, radii, chrom, n_struct, n_bead = read_hms(xin)
+
+        elif isinstance(xin, list) or isinstance(xin, tuple):
+            fname = xin[0]
+            base, ext = splitext(basename(fname))
+            if ext == '.hts':
+                grp = xin[1]
+                with HtfFile(fname, 'r') as f:
+                    crd = f.get_coordinates(grp)
+                    radii = f.radii
+                    chrom = f.index.chrom
+            elif ext == '.bindat':
+                hssf = xin[1]
+                i = xin[2]
+                with HssFile(hssf, 'r') as f:
+                    radii = f.radii
+                    chrom = f.index.chrom 
+                with PopulationCrdFile(fname, 'r') as f:
+                    crd = f.get_struct(i)
+            else:
+                raise ValueError('Unknown input format')
+        else:
+            raise ValueError('Wrong argument format')
 
         # read parameters from disk
         with open(param_fname) as f:
             kwargs = json.load(f)
 
-
-        # read coordinates from disk
-        crd, radii, chrom, n_bead, violations, info = read_hms(fname)
-    
         # perform minimization
         new_crd, info, violations = lammps_minimize(crd, radii, chrom, run_name, **kwargs)
         
         # write coordinates to disk asyncronously and return run info
         #ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         #ex.submit(write_hms, new_fname, new_crd, radii, chrom, violations, info)
+        if isinstance(xout, str):
+            write_hms(xout, new_crd, radii, chrom, violations, info)
+            os.chmod(xout, 0o664)
+        elif isinstance(xout, list) or isinstance(xout, tuple):
+            fname = xout[0]
+            base, ext = splitext(basename(fname))
+            if ext == '.hts':
+                grp = xout[1]
+                with HtfFile(fname) as f:
+                    try:
+                        f[grp]
+                    except KeyError:
+                        f.create_group(grp)
+                    f.set_coordinates(grp, new_crd)
+                    f.set_violations(grp, violations)
+                    f.set_info(grp, info)
+            elif ext == '.bindat':
+                i = xout[1]
+                with PopulationCrdFile(fname) as f:
+                    f.set_struct(i, new_crd)
+            else:
+                raise ValueError('Unknown output format')
+        else:
+            raise ValueError('Wrong argument format')
+            
 
-        write_hms(new_fname, new_crd, radii, chrom, violations, info)
-        os.chmod(new_fname, 0o664)
+
         return (0, info, len(violations))
 
     except:
@@ -1351,13 +1086,13 @@ def _serial_lammps_call(iargs):
     
 
 def bulk_minimize_single_file(parallel_client,
-                              old_prefix,
-                              new_prefix,
+                              input_hss,
+                              input_crd,
+                              output_crd,
                               n_struct,
                               workdir='.',
                               tmp_files_dir='/dev/shm',
                               log_dir='.',
-                              check_violations=True,
                               ignore_restart=False,
                               **kwargs):
     '''
@@ -1444,21 +1179,221 @@ def bulk_minimize_single_file(parallel_client,
             logger.info('bulk_minimize_single_file(): ignoring completed runs.')
         else:
             for i in range(n_struct):
-                fname = '{}_{}.hms'.format(new_prefix, i)
+
+                # fname = '{}_{}.hms'.format(new_prefix, i)
+                # fpath = os.path.join(workdir, fname)
+                # if os.path.isfile(fpath):
+                #     completed.append(i)
+                # else:
+                #     to_minimize.append(i)
+
+                fname = 'copy%d.hts' % i
                 fpath = os.path.join(workdir, fname)
-                if os.path.isfile(fpath):
-                    completed.append(i)
-                else:
-                    to_minimize.append(i)
+                with HtfFile(fpath, 'r') as f:
+                    if new_prefix not in f:
+                        to_minimize.append(i) 
+
             if len(to_minimize) == 0:
                 logger.info('bulk_minimize_single_file(): minimization appears to be already finished.')
                 return (0, 0)
             logger.info('bulk_minimize_single_file(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
 
         # prepare arguments as a list of tuples (map wants a single argument for each call)
-        pargs = [(os.path.join(workdir, '{}_{}.hms'.format(old_prefix, i)),
-                  parameter_fname,
-                  os.path.join(workdir, '{}_{}.hms'.format(new_prefix, i))) for i in to_minimize] 
+        pargs = []
+        for i in to_minimize:
+            run_name = '{}_{}'.format(
+                new_prefix,
+                i
+            )
+
+            xin = (
+                os.path.join(workdir, 'copy%d.hts' % i), 
+                old_prefix,
+            )
+
+            xout = (
+                os.path.join(workdir, 'copy%d.hts' % i), 
+                new_prefix,
+            )
+
+            pargs.append((
+                xin,
+                parameter_fname,
+                xout,
+                run_name
+            ))
+
+        # using ipyparallel to map functions to workers
+        engine_ids = list(parallel_client.ids)
+        lbv = parallel_client.load_balanced_view()
+
+        logger.info('bulk_minimize_single_file(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
+        ar = lbv.map_async(_serial_lammps_call, pargs)
+        logger.debug('bulk_minimize_single_file(): map_async sent.')
+
+        # monitor progress
+        monitor_progress('bulk_minimize_single_file() - %s' % new_prefix, ar)
+
+        # post-analysis
+        logger.info('bulk_minimize_single_file(): Done (Total time: %s)' % pretty_tdelta(ar.wall_time))
+        results = list(ar.get())  # returncode, info, n_violations  
+
+        # check for errors
+        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
+        now_completed = [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
+        if len(errors):
+            for i, e in errors:
+                logger.error('Exception returned in minimizing structure %d: %s', i, e)
+                print()
+            raise RuntimeError('Unable to complete bulk_minimize_single_file()')
+        
+        # print a summary
+        n_violated = sum([1 for i, r in now_completed if r[2] > 0 ])
+        logger.info('%d structures with violations over %d structures',
+                     n_violated,
+                     len(now_completed))
+
+        return len(now_completed), n_violated
+    
+    except:
+        logger.error('bulk_minimization() failed', exc_info=True)
+        raise
+
+
+
+def bulk_minimize_single_file_net(parallel_client,
+                                  input_hss,
+                                  input_crd,
+                                  output_crd,
+                                  n_struct,
+                                  workdir='.',
+                                  ignore_restart=False,
+                                  **kwargs):
+    '''
+    Uses ipyparallel to minimize a population of structures.
+
+    :Arguments:
+        *parallel_client (ipyparallel.Client instance)* 
+            The ipyparallel.Client instance to send the jobs to
+
+        *old_prefix (string)*
+            The function will search for files named 
+            *old_prefix_<n>.hms* in the working directory, with *n*
+            in the range 0, ..., *n_struct*
+
+        *new prefix (string)*
+            After minimization, *n_struct* new files 
+            named *new_prefix_<n>.hms* will be written to the
+            working directory
+
+        *n_struct (int)*
+            Number of structures in the population
+
+        *workdir (string)*
+            Set the working directory where the hms files will
+            be found and written.
+
+        *tmp_files_dir (string)*
+            Directory where to store temporary files
+
+        *log_dir (string)*
+            Eventual errors will be dumped to this directory
+
+        *check_violations (bool)*
+            If set to False, skip the violations check
+
+        *ignore_restart (bool)*
+            If set to True, the function will not check the
+            presence of files named *new_prefix_<n>.hms*
+            in the working directory. All the runs will be 
+            re-sent and eventual files already present 
+            will be overwritten.
+
+        *\*\*kwargs*
+            Other keyword arguments to pass to the minimization
+            process. See lammps.generate_input documentation for
+            details
+
+    :Output:
+        *now_completed*
+            Number of completed minimizations in this call
+
+        *n_violated*
+            Number of structures with violations in this call
+
+        Additionally, *now_completed* files 
+        named *new_prefix_<n>.hms*
+        will be written in the *work_dir* directory.
+    
+    :Exceptions:
+        If one or more of the minimizations
+        fails, it will raise a RuntimeError.
+    '''
+
+    # get the logger
+    logger = logging.getLogger()
+
+    try:
+        import json
+
+        # write all parameters to a file on filesystem
+        kwargs['ignore_restart'] = ignore_restart
+        kwargs['workdir'] = os.path.abspath(workdir)
+        parameter_fname = os.path.join(workdir, new_prefix + '.parms.json')
+        with open(parameter_fname, 'w') as fp:
+            json.dump(kwargs, fp)
+    
+        # check if we already have some output files written.
+        completed = []
+        to_minimize = []
+        if ignore_restart:
+            to_minimize = list(range(n_struct))
+            logger.info('bulk_minimize_single_file(): ignoring completed runs.')
+        else:
+            for i in range(n_struct):
+
+                # fname = '{}_{}.hms'.format(new_prefix, i)
+                # fpath = os.path.join(workdir, fname)
+                # if os.path.isfile(fpath):
+                #     completed.append(i)
+                # else:
+                #     to_minimize.append(i)
+
+                fname = 'copy%d.hts' % i
+                fpath = os.path.join(workdir, fname)
+                with HtfFile(fpath, 'r') as f:
+                    if new_prefix not in f:
+                        to_minimize.append(i) 
+
+            if len(to_minimize) == 0:
+                logger.info('bulk_minimize_single_file(): minimization appears to be already finished.')
+                return (0, 0)
+            logger.info('bulk_minimize_single_file(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
+
+        # prepare arguments as a list of tuples (map wants a single argument for each call)
+        pargs = []
+        for i in to_minimize:
+            run_name = '{}_{}'.format(
+                new_prefix,
+                i
+            )
+
+            xin = (
+                os.path.join(workdir, 'copy%d.hts' % i), 
+                old_prefix,
+            )
+
+            xout = (
+                os.path.join(workdir, 'copy%d.hts' % i), 
+                new_prefix,
+            )
+
+            pargs.append((
+                xin,
+                parameter_fname,
+                xout,
+                run_name
+            ))
 
         # using ipyparallel to map functions to workers
         engine_ids = list(parallel_client.ids)

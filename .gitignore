@@ -2,3 +2,4 @@
 **/__pycache__
 **/*.pyc
 **/lammps_hic.egg-info
+**/._*
