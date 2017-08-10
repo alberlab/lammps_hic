@@ -66,6 +66,7 @@ ARG_DEFAULT = {
     'fish': None,
     'damid': None,
     'bc_cluster': None,
+    'bc_cluster_size': 2.0,
     'out': 'out.lammpstrj',
     'data': 'input.data',
     'lmp': 'minimize.lam',
@@ -101,7 +102,7 @@ ARG_DEFAULT = {
 }
 
 
-class BT(object):
+class BT(object): # restraint type
     CONSECUTIVE = 0
     HIC = 1
     DAMID = 2
@@ -109,6 +110,18 @@ class BT(object):
     FISH_PAIR = 4
     BARCODED_CLUSTER = 5
 
+class AT(object): # atom type
+    BEAD = 1
+    CLUSTER_CENTROID = 2
+    CENTRAL_DUMMY = 3
+
+class BS(object): # bond style
+    HARMONIC_UPPER_BOUND = 1
+    HARMONIC_UPPER_BOUND = 2
+
+class hashabledict(dict):
+    def __hash__(self):
+        return hash(tuple(sorted(self.items())))
 
 class BondType(object):
     '''
@@ -117,26 +130,26 @@ class BondType(object):
     representation is in the *1, ..., N* LAMMPS
     format.
     '''
-    def __init__(self, b_id, type_str, kspring, r0):
+    def __init__(self, b_id, style_id, kspring, r0):
         self.id = b_id
         self.kspring = kspring
-        self.type_str = type_str
+        self.style_id = style_id
         self.r0 = r0 
 
     def __str__(self):
         return '{} {} {} {}'.format(self.id + 1,
-                                    self.type_str,
+                                    self.style_id,
                                     self.kspring,
                                     self.r0)
 
     def __eq__(self, other): 
         return (self.r0 == other.r0 and
                 self.kspring == other.kspring and
-                self.type_str == other.type_str)  
+                self.style_id == other.style_id)  
 
 
     def __hash__(self):
-        return hash((self.r0, self.kspring, self.type_str))
+        return hash((self.r0, self.kspring, self.style_id))
 
 
 class Bond(object):
@@ -160,6 +173,43 @@ class Bond(object):
 
     def __eq__(self, other): 
         return self.__dict__ == other.__dict__
+
+
+class Atom(object):
+    """docstring for Atom"""
+    def __init__(self, a_id, type_id, mol_id, xyz):
+        self.id = a_id
+        self.type_id = type_id
+        self.mol_id = mol_id
+        self.xyz = xyz
+
+    def __str__(self):
+        return '{} {} {} {} {} {}'.format(self.id + 1, 
+                                          self.mol_id + 1, 
+                                          self.type_id + 1, 
+                                          self.xyz[0],
+                                          self.xyz[1],
+                                          self.xyz[2])
+
+class System(object):
+    def __init__(self):
+        self.atoms = []
+        self.bonds = []
+        self.bond_types = []
+        self.bt_ids = {}
+
+    def add_bond(i, j, style_id, kspring, r0):
+        
+        bt = BondType(len(self.bond_types), style_id, kspring, r0) 
+
+        self.bt_ids.get((style_id, kspring, r0), None)
+        if bt is None:
+            bt = len(self.bt_ids)
+            self.bt_ids[(style_id, kspring, r0)] = bt
+            self.bond_types.append(BondType(bt, style_id, kspring, r0))
+        self.bonds.append(Bond(len(self.bonds), bt, i, j))
+
+
 
 
 class BondContainer(object):
@@ -289,11 +339,12 @@ def _chromosome_string_to_numeric_id(chrom):
 
 
 
-def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii, n_atoms):
+def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, size_factor, 
+                          coord, radii, n_atoms):
     def cbrt(x):
         return (x)**(1./3.)
     def get_cluster_size(n, radii):
-        return 0.5 * cbrt(n - 1) * np.average(radii)
+        return size_factor * cbrt(n - 1) * np.average(radii)
 
     centroids = []
     with h5py.File(cluster_file) as f:
@@ -310,7 +361,7 @@ def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, coord, radii,
             centroid_pos = np.mean(coord[beads], axis=0)
             bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
             for b in beads:
-                bonds_container.add_bond(bt, len(centroids), b, BT.BARCODED_CLUSTER)    
+                bonds_container.add_bond(bt, n_atoms + len(centroids), b, BT.BARCODED_CLUSTER)    
             centroids.append(centroid_pos)
             
     return centroids
@@ -784,7 +835,8 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
     if args['bc_cluster'] is not None:
         if isinstance(args['bc_cluster'], string_types):
             centroids = _gen_bc_cluster_bonds(bond_list, args['bc_cluster'],
-                                              args['i'], crd, bead_radii, 
+                                              args['i'], args['bc_cluster_size'],
+                                              crd, bead_radii, 
                                               n_atoms + dummies.n_dummy)
             n_centroids = len(centroids)
     else:
@@ -887,7 +939,7 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
         print('group beads type <', dummy_type, file=f)
         print('group dummy type', dummy_type, file=f)
         print('group centroid type', centroid_type, file=f)
-        print('group integrate type', dummy_type, centroid_type, file=f)
+        print('group integrate union beads centroid', file=f)
 
         print('neighbor', max(bead_radii), 'bin', file=f)  # skin size
         print('neigh_modify every 1 check yes', file=f)
