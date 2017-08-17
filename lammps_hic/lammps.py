@@ -32,14 +32,13 @@ in the wrappers module.
 from __future__ import print_function, division
 import os
 import os.path
-import itertools
 import math
 import logging
 import numpy as np
 from numpy.linalg import norm
 from io import StringIO
-from six import string_types
 from myio import Violations
+from itertools import groupby
 
 from subprocess import Popen, PIPE
 try:
@@ -65,81 +64,65 @@ __version__ = "0.0.1"
 __email__   = "polles@usc.edu"
 
 
-ARG_DEFAULT = {
-    'nucleus_radius': 5000.0,
-    'occupancy': 0.2,
-    'actdist': None,
-    'fish': None,
-    'damid': None,
-    'bc_cluster': None,
-    'out': 'out.lammpstrj',
-    'data': 'input.data',
-    'lmp': 'minimize.lam',
-    'apprestr': None,
-    'contact_kspring': 1.0,
-    'contact_range': 2.0,
-    'fish_type': 'rRpP',
-    'fish_kspring': 1.0,
-    'fish_tol': 0.0,
-    'damid_kspring': 1.0,
-    'damid_tol': 50.0,
-    'mdsteps': 20000,
-    'timestep': 0.25,
-    'tstart': 20.0,
-    'tstop': 1.0,
-    'damp': 50.0,
-    'seed': np.random.randint(100000000),
-    'write': None,
-    'thermo': 1000,
-    'max_velocity': 5.0,
-    'evfactor': 1.0,
-    'max_neigh': 2000,
-    'max_cg_iter': 500,
-    'max_cg_eval': 500,
-    'etol': 1e-4,
-    'ftol': 1e-6,
-    'territories': 0,
-    'soft_min': 0,
-    'ev_start': 0.0,
-    'ev_stop': 0.0,
-    'ev_step': 0,
-    'i': -1,  # the index of the structure, used for fish and single cell data
-}
+ARG_DEFAULT = [
+    ('nucleus_radius', 5000.0, float, 'default nucleus radius'),
+    ('occupancy', 0.2, float, 'default volume occupancy (from 0.0 to 1.0)'),
+    ('actdist', None, str, 'activation distances file (ascii text)'),
+    ('fish', None, str, 'fish distances file (hdf5)'),
+    ('damid', None, str, 'damid activation distances file (ascii text)')
+    ('bc_cluster', None, str, 'filename of cluster file (hdf5)'),
+    ('out', 'out.lammpstrj', str, 'Temporary lammps trajectory file name'),
+    ('data', 'input.data', str, 'Temporary lammmps input data file name'), 
+    ('lmp', 'minimize.lam', str, 'Temporary lammps script file name'), 
+    ('apprestr', None, str, 'Deprecated'),
+    ('contact_kspring', 1.0, float, 'HiC contacts spring constant'),
+    ('contact_range', 2.0, float, 'HiC contact range (in radius units)'),
+    ('fish_type', 'rRpP', str, 'FISH restraints type'),
+    ('fish_kspring', 1.0, float, 'FISH restraints spring constant'),
+    ('fish_tol', 0.0, float, 'FISH restraints tolerance (nm)'),
+    ('damid_kspring', 1.0, float, 'lamina DamID restr. spring constant'),
+    ('damid_tol', 50.0, float, 'lamina DamID restraint tolerance (nm)'),
+    ('mdsteps', 20000, int, 'Number of MD steps per round'),
+    ('timestep', 0.25, float, 'MD timestep'),
+    ('tstart', 20.0, float, 'MD initial temperature'),
+    ('tstop', 1.0, float, 'MD final temperature'),
+    ('damp', 50.0, float, 'MD damp parameter'),
+    ('seed', np.random.randint(100000000), int, 'RNG seed'),
+    ('write', -1, int, 'Dump coordinates every <write> MD timesteps'),
+    ('thermo', 1000, int, 'Output thermodynamic info every <thermo>' 
+                          ' MD timesteps'),
+    ('max_velocity', 5.0, float, 'Cap particle velocity'),
+    ('evfactor', 1.0, float, 'Scale excluded volume by this factor'),
+    ('max_neigh', 2000, int, 'Maximum numbers of neighbors per particle'),
+    ('max_cg_iter', 500, int, 'Maximum # of Conjugate Gradient steps'),
+    ('max_cg_eval', 500, int, 'Maximum # of Conjugate Gradient evaluations'),
+    ('etol', 1e-4, float, 'Conjugate Gradient energy tolerance'),
+    ('ftol', 1e-6, float, 'Conjugate Gradient force tolerance'),
+    ('territories', 0, int, 'apply territories restraints every <> beads'),
+    ('soft_min', 0, int, 'perform a soft minimization of lenght <> timesteps'),
+    ('ev_start', 0.0, float, 'initial excluded volume factor'),
+    ('ev_stop', 0.0, float, 'final excluded volume factor'),
+    ('ev_step', 0, int, 'If larger than zero, performs <n> rounds scaling '
+                        'excluded volume factors from ev_start to ev_stop'),
+    ('i', -1, int, 'Index of the structure, used for fish and single cell' 
+                   'data'),
+]
 
 
 def validate_user_args(kwargs):
-    args = {k: v for k, v in ARG_DEFAULT.items()}
+    args = {k: v for k, v, _, _ in ARG_DEFAULT}
+    atypes = {k: t for k, _, t, _ in ARG_DEFAULT}
     for k, v in kwargs.items():
+        if k not in args:
+            raise ValueError('Keywords argument %s not recognized.' % k)
         if v is not None:
-            args[k] = v
+            args[k] = atypes(v)
 
-    if args['write'] is None:
+    if args['write'] == -1:
         args['write'] = args['mdsteps']  # write only final step
-    else:
-        # this is only because it may be passed as string
-        args['write'] = int(args['write'])
-
+    
     return args
 
-
-def read_actdists(ad):
-    assert(ad is not None)
-    actdists = []
-    if isinstance(ad, str) or isinstance(ad, unicode):
-        if ad[-7:] == ".txt.gz":
-            import gzip
-            with gzip.open(ad) as f:
-                for line in f:
-                    try:
-                        i, j, pwish, d, p, pnow = line.split()
-                    except ValueError:
-                        continue
-                    actdists.append((int(i), int(j), pwish, float(d), p, pnow))
-        elif os.path.getsize(ad) > 0:
-            actdists = read_full_actdist(ad)
-    else:
-        actdists = ad
-    return actdists
 
 
 def read_damid(damid):
@@ -156,51 +139,12 @@ def read_damid(damid):
     return damid_actdists
 
 
-def get_radii_to_atom_type_mapping(radii):
-    '''
-    Compute the unique mapping between radii and atom types.
-
-    Parameters
-    ----------
-        radii : list of floats
-
-    Returns
-    -------
-        dict : the mapping radius -> atom type id 
-    '''
-    radius_to_atom_type = {}
-    at = 0
-    atom_types = np.empty(len(radii), dtype=int)
-    for i, r in enumerate(radii):
-        aid = radius_to_atom_type.get(r)
-        if aid is None:
-            at += 1
-            radius_to_atom_type[r] = at
-            aid = at
-        atom_types[i] = aid
-    return radius_to_atom_type
-
-
-def create_lammps_data(system, index, user_args):
-    radii = [a.radius for a in system.atoms]
-    radius_to_atom_type = get_radii_to_atom_type_mapping(radii)
+def create_lammps_data(model, user_args):
     
-    n_atom_types = len(radius_to_atom_type)
-    n_bonds = len(system.bonds)
-    n_bondtypes = len(system.bond_parms)
-    n_atoms = len(system.atoms)
-
-    # generate molecule IDs
-    molids = [0] * len(index)
-    last_molid = 0
-    last_chr = -1
-    n_mol = 0
-    for i in range(len(index)):
-        if last_chr != index.chrom[i]:
-            n_mol += 1
-            last_molid += 1
-        molids[i] = last_molid
-        last_chr = index.chrom[i]
+    n_atom_types = len(model.atom_types)
+    n_bonds = len(model.bonds)
+    n_bondtypes = len(model.bond_types)
+    n_atoms = len(model.atoms)
 
     with open(user_args['data'], 'w') as f:
 
@@ -218,15 +162,8 @@ def create_lammps_data(system, index, user_args):
 
         print('\nAtoms\n', file=f)
         # index, molecule, atom type, x y z.
-        for i, atom in enumerate(system.atoms):
-            x, y, z = atom.crd
-            atype = radius_to_atom_type[atom.radius]
-            if i < len(index):
-                molid = molids[i]
-            else:
-                molid = n_mol + 1
-
-            print(atom.id, molid, atype, x, y, z, file=f)
+        for atom in model.atoms:
+            print(atom, file=f)
         
         # bonds
         # Harmonic Upper Bond Coefficients are one for each bond type
@@ -235,35 +172,38 @@ def create_lammps_data(system, index, user_args):
         # Each bond is coded as:
         #   Bond_id Bond_type_id ibead jbead
 
-        print('\nBond Coeffs\n', file=f)
-        for i, params in enumerate(system.bond_parms):
-            params['id'] = i + 1 
-            print(params['id'], type_string[params['style']], params['k'], 
-                  params['r'], file=f)
+        if n_bonds > 0:
+            print('\nBond Coeffs\n', file=f)
+            for bt in model.bond_types:
+                print(bt, file=f)
 
-        print('\nBonds\n', file=f)
-        for i, bond in enumerate(system.bonds):
-            print(i + 1, bond.bond_params['id'], bond.i.id, bond.j.id, file=f)
+            print('\nBonds\n', file=f)
+            for bond in model.bonds:
+                print(bond, file=f)
 
         # Excluded volume coefficients
-        atom_radii = [r for r in sorted(radius_to_atom_type, key=radius_to_atom_type.__getitem__)]
+        atom_types = list(model.atom_types.values())
 
         print('\nPairIJ Coeffs\n', file=f)
-        for i, ri in enumerate(atom_radii):
-            for j in range(i, len(atom_radii)):
-                rj = atom_radii[j] 
-                if ri*rj == 0 :
-                    dc = 0
-                else:
+        for i in range(len(atom_types)):
+            a1 = atom_types[i]
+            for j in range(i, len(atom_types)):
+                a2 = atom_types[j]
+                if (a1.atom_category == AtomType.BEAD and
+                    a2.atom_category == AtomType.BEAD):
+                    ri = a1.radius
+                    rj = a2.radius
                     dc = (ri + rj)
-                A = (dc/math.pi)**2
-                #sigma = dc / 1.1224 #(2**(1.0/6.0))
-                #print(i+1, user_args['evfactor'], sigma, dc, file=f)
-                print(i+1, j+1, A*user_args['evfactor'], dc, file=f)
+                    A = (dc/math.pi)**2
+                    #sigma = dc / 1.1224 #(2**(1.0/6.0))
+                    #print(i+1, user_args['evfactor'], sigma, dc, file=f)
+                    print(ii+1, jj+1, A*user_args['evfactor'], dc, file=f)
+                else:
+                    print(ii+1, jj+1, 0.0, 0.0, file=f)
         
 
-def create_lammps_script(system, index, user_args):
-    radii = [a.radius for a in system.atoms]
+def create_lammps_script(model, user_args):
+    radii = [a.radius for a in model.atoms]
     radius_to_atom_type = get_radii_to_atom_type_mapping(radii)
 
     with open(user_args['lmp'], 'w') as f:
@@ -275,7 +215,7 @@ def create_lammps_script(system, index, user_args):
         print('boundary              f f f', file=f)
 
         # Needed to avoid calculation of 3 neighs and 4 neighs
-        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
+        #print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
 
 
         # excluded volume
@@ -284,32 +224,42 @@ def create_lammps_script(system, index, user_args):
         print('read_data', user_args['data'], file=f)
         print('mass * 1.0', file=f)
 
-        print('group beads type <=', len(index), file=f)
-        frozen_ids = [atom.id for atom in system.atoms if atom.frozen]
-        if frozen_ids:
-            print('group frozen id', ' '.join(frozen_ids) , file=f)
-        phantom_type = radius_to_atom_type.get(0.0, None)
-        if phantom_type:
-            print('group phantom type', phantom_type, file=f)
+        # groups atom types by atom_category
+        sortedlist = sorted(list(l.atom_types), key=lambda x: x.atom_category)
+        groupedlist = {k: list(v) for k, v in groupby(sortedlist, 
+                                                key=lambda x: x.atom_category)}
+
+
+        bead_types = [str(x) for x in groupedlist[AtomType.BEAD]]
+        dummy_types = [str(x) for x in groupedlist[AtomType.FIXED_DUMMY]]
+        centroid_types = [str(x) for x in groupedlist[AtomType.CLUSTER_CENTROID]]
+        print('group beads type', ' '.join(bead_types), file=f)
+
+        if dummy_types:
+            print('group dummy type', ' '.join(dummy_types) , file=f)
+            print('neigh_modify exclude group dummy all', file=f)
+        if centroid_types:
+            print('group centroid type', ' '.join(centroid_types), file=f)
+            print('neigh_modify exclude group centroid all', file=f)
+
+        print('group nonfixed type', ' '.join(centroid_types
+                                            + beads), file=f)
 
         print('neighbor', max(radii), 'bin', file=f)  # skin size
         print('neigh_modify every 1 check yes', file=f)
         print('neigh_modify one', user_args['max_neigh'],
               'page', 20 * user_args['max_neigh'], file=f)
 
-        # exclude neighbor interactions for non beads
-        if phantom_type:
-            print('neigh_modify exclude group phantom all', file=f)
         
         # Freeze dummy atom
-        if frozen_ids:
-            print('fix 1 frozen setforce 0.0 0.0 0.0', file=f)
+        if dummy_types:
+            print('fix 1 dummy setforce 0.0 0.0 0.0', file=f)
 
         # Integration
         # select the integrator
-        print('fix 2 beads nve/limit', user_args['max_velocity'], file=f)
+        print('fix 2 nonfixed nve/limit', user_args['max_velocity'], file=f)
         # Impose a thermostat - Tstart Tstop tau_decorr seed
-        print('fix 3 beads langevin', user_args['tstart'], user_args['tstop'],
+        print('fix 3 nonfixed langevin', user_args['tstart'], user_args['tstop'],
               user_args['damp'], user_args['seed'], file=f)
         print('timestep', user_args['timestep'], file=f)
 
@@ -364,7 +314,7 @@ def generate_input(crd, radii, index, **kwargs):
         crd : np.ndarray
             Starting bead coordinates
         radii : np.ndarray or list of floats
-            Radius of each bead in the system
+            Radius of each bead in the model
         index : alabtools.Index
             alabtools.Index instance for the system
         
@@ -521,33 +471,34 @@ def generate_input(crd, radii, index, **kwargs):
 
     args = validate_user_args(kwargs)
 
-    system = LammpsSystem()
+    model = LammpsModel()
     
     # create an atom for each genome bead
     for i in range(n_genome_beads):
-        system.add_atom(crd[i], radii[i])
+        atype = AtomType(radii[i])
+        model.add_atom(atom_type=atype, xyz=crd[i])
     
-    apply_consecutive_beads_restraints(system, index, radii, args)
+    apply_consecutive_beads_restraints(model, index, radii, args)
     
     if args['actdist'] is not None:
         actdist = read_actdists(args['actdist'])
-        apply_hic_restraints(system, crd, radii, index, actdist, args)
+        apply_hic_restraints(model, crd, radii, index, actdist, args)
 
     if args['damid'] is not None:
         damid_ad = read_damid(args['damid'])
-        apply_damid_restraints(system, crd, radii, index, damid_ad, args)
+        apply_damid_restraints(model, crd, radii, index, damid_ad, args)
 
     if args['fish'] is not None:
-        apply_fish_restraints(system, crd, index, args)
+        apply_fish_restraints(model, crd, index, args)
 
     if args['bc_cluster'] is not None:
-        apply_barcoded_cluster_restraints(system, coord, radii, 
+        apply_barcoded_cluster_restraints(model, coord, radii, 
                                           args['bc_cluster'], args)
 
-    create_lammps_data(system, index, args)
-    create_lammps_script(system, index, args)
+    create_lammps_data(model, args)
+    create_lammps_script(model, args)
 
-    return system
+    return model
 
 
 def _check_violations(bond_list, crd):

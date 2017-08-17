@@ -1,13 +1,37 @@
 import numpy as np
 from numpy.linalg import norm
 
+from ..lammps_utils import Bond, HarmonicUpperBound
 from ..actdist import _get_copy_index
 from ..lammps_utils import BS, BT
 
+def read_actdists(ad):
+    assert(ad is not None)
+    actdists = []
+    if isinstance(ad, str) or isinstance(ad, unicode):
+        if ad[-7:] == ".txt.gz":
+            import gzip
+            with gzip.open(ad) as f:
+                for line in f:
+                    try:
+                        i, j, pwish, d, p, pnow = line.split()
+                    except ValueError:
+                        continue
+                    actdists.append((int(i), int(j), pwish, float(d), p, pnow))
+        elif os.path.getsize(ad) > 0:
+            actdists = read_full_actdist(ad)
+    else:
+        actdists = ad
+    return actdists
 
-def apply_hic_restraints(system, crd, radii, index, actdists, user_args):
-    
+
+def apply_hic_restraints(model, crd, radii, index, user_args):
+    ad_fname = user_args['actdist']
+    ck = user_args['contact_kspring']
+    crange = user_args['contact_range']
     copy_index = _get_copy_index(index)
+
+    actdists = read_actdists(ad_fname)
 
     for (i, j, pwish, d, p, pnow) in actdists:
         ii = copy_index[i]
@@ -36,19 +60,16 @@ def apply_hic_restraints(system, crd, radii, index, actdists, user_args):
             continue
 
         # we have at least one bond to enforce
-        parms = {
-            'style' : BS.HARMONIC_UPPER_BOUND,
-            'k' : user_args['contact_kspring'],
-            'r' : user_args['contact_range'] * rsph,
-        }
-
+        bt = HarmonicUpperBound(k=ck,
+                                r0=crange * rsph)
+        
         for it in range(n_possible_contacts):
-            if cd[it] > dcc:
+            if cd[idx[it]] > dcc:
                 break
             else:
-                k = ii[it // len(jj)]
-                m = jj[it % len(jj)]
-                system.add_bond(system.atoms[k], system.atoms[m], parms, BT.HIC)
+                k = ii[idx[it] // len(jj)]
+                m = jj[idx[it] % len(jj)]
+                model.add_bond(k, m, bt, Bond.HIC)
                 
 
         

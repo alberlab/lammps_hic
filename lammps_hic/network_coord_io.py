@@ -13,7 +13,6 @@ import os
 import threading
 
 from .myio import PopulationCrdFile
-import time
 
 logger = logging.getLogger()
 fhandler = logging.FileHandler(filename='coord_server.log', mode='a')
@@ -210,5 +209,3 @@ root = logging.getLogger()
 for handler in root.handlers[:]:
     root.removeHandler(handler)
 root.addHandler(logging.StreamHandler())
-# s = CoordServer('test.bindat', mode='r+', shape=(10,20,3), port=12122)
-# s.run()
