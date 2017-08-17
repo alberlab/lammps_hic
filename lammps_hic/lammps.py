@@ -35,8 +35,8 @@ import os.path
 import h5py
 import math
 import logging
+import warnings
 import numpy as np
-import concurrent.futures
 from numpy.linalg import norm
 from io import StringIO
 from six import string_types
@@ -110,14 +110,6 @@ class BT(object): # restraint type
     FISH_PAIR = 4
     BARCODED_CLUSTER = 5
 
-class AT(object): # atom type
-    BEAD = 1
-    CLUSTER_CENTROID = 2
-    CENTRAL_DUMMY = 3
-
-class BS(object): # bond style
-    HARMONIC_UPPER_BOUND = 1
-    HARMONIC_UPPER_BOUND = 2
 
 class hashabledict(dict):
     def __hash__(self):
@@ -130,6 +122,9 @@ class BondType(object):
     representation is in the *1, ..., N* LAMMPS
     format.
     '''
+    HARMONIC_UPPER_BOUND = 0
+    HARMONIC_LOWER_BOUND = 1
+
     def __init__(self, b_id, style_id, kspring, r0):
         self.id = b_id
         self.kspring = kspring
@@ -151,6 +146,44 @@ class BondType(object):
     def __hash__(self):
         return hash((self.r0, self.kspring, self.style_id))
 
+class HarmonicUpperBound(BondType):
+    style_str = 'harmonic_upper_bound'
+    style_id = BondType.HARMONIC_UPPER_BOUND
+
+    def __init__(self, b_id=-1, k=1.0, r0=0.0):
+        self.id = b_id
+        self.k = k
+        self.r0 = r0
+
+    def __str__(self):
+        return '{} {} {} {}'.format(self.id + 1,
+                                    self.__class__.style_str,
+                                    self.k,
+                                    self.r0)
+
+    def __hash__(self):
+        return hash((self.__class__.style_id, self.k, self.r0))
+
+class HarmonicLowerBound(BondType):
+    style_str = 'harmonic_lower_bound'
+    style_id = BondType.HARMONIC_LOWER_BOUND
+
+    def __init__(self, b_id=-1, k=1.0, r0=0.0):
+        self.id = b_id
+        self.k = k
+        self.r0 = r0
+
+    def __str__(self):
+        return '{} {} {} {}'.format(self.id + 1,
+                                    self.__class__.style_str,
+                                    self.k,
+                                    self.r0)
+
+    def __hash__(self):
+        return hash((self.__class__.style_id, self.k, self.r0))
+
+    #def
+
 
 class Bond(object):
     '''
@@ -159,6 +192,13 @@ class Bond(object):
     representation is in the *1, ..., N* LAMMPS
     format.
     '''
+    CONSECUTIVE = 0
+    HIC = 1
+    DAMID = 2
+    FISH_RADIAL = 3
+    FISH_PAIR = 4
+    BARCODED_CLUSTER = 5
+
     def __init__(self, b_id, bond_type, i, j):
         self.id = b_id
         self.bond_type = bond_type
@@ -176,6 +216,10 @@ class Bond(object):
 
 
 class Atom(object):
+    BEAD = 0
+    CLUSTER_CENTROID = 1
+    FIXED_DUMMY = 2
+
     """docstring for Atom"""
     def __init__(self, a_id, type_id, mol_id, xyz):
         self.id = a_id
@@ -198,7 +242,7 @@ class System(object):
         self.bond_types = []
         self.bt_ids = {}
 
-    def add_bond(i, j, style_id, kspring, r0):
+    def add_bond(self, i, j, style_id, kspring, r0):
         
         bt = BondType(len(self.bond_types), style_id, kspring, r0) 
 
@@ -341,10 +385,11 @@ def _chromosome_string_to_numeric_id(chrom):
 
 def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, size_factor, 
                           coord, radii, n_atoms):
+
     def cbrt(x):
         return (x)**(1./3.)
-    def get_cluster_size(n, radii):
-        return size_factor * cbrt(n - 1) * np.average(radii)
+    def get_cluster_size(radii):
+        return cbrt(size_factor * np.sum(radii**3))
 
     centroids = []
     with h5py.File(cluster_file) as f:
@@ -355,12 +400,12 @@ def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, size_factor,
             start_pos = idxptr[cluster_id]
             end_pos = idxptr[cluster_id + 1]
             beads = f['data'][start_pos:end_pos][()]
-            csize = get_cluster_size(len(beads), radii[beads])
+            csize = get_cluster_size(radii[beads])
             
             # add a centroid for the cluster
             centroid_pos = np.mean(coord[beads], axis=0)
-            bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize)
             for b in beads:
+                bt = bonds_container.add_type('harmonic_upper_bound', 1.0, csize-radii[b])
                 bonds_container.add_bond(bt, n_atoms + len(centroids), b, BT.BARCODED_CLUSTER)    
             centroids.append(centroid_pos)
             
@@ -533,6 +578,8 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
 
     args = {k: v for k, v in ARG_DEFAULT.items()}
     for k, v in kwargs.items():
+        if k not in args:
+            warnings.warn('Keywords argument %s not recognized.' % k, RuntimeWarning)
         if v is not None:
             args[k] = v
 
@@ -832,8 +879,12 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
     # Barcoded clusters restraints #
     ################################
 
+    
     if args['bc_cluster'] is not None:
         if isinstance(args['bc_cluster'], string_types):
+            if args['i'] < 0:
+                raise ValueError('Single cell restraints need a structure '
+                                 'index. Did you specify the "i" parameter?')
             centroids = _gen_bc_cluster_bonds(bond_list, args['bc_cluster'],
                                               args['i'], args['bc_cluster_size'],
                                               crd, bead_radii, 
@@ -1009,13 +1060,13 @@ def _check_violations(bond_list, crd):
     for bond_no, bond in enumerate(bond_list.bonds):
         bt = bond_list.bond_types[bond.bond_type]
         d = norm(crd[bond.i] - crd[bond.j])
-        if bt.type_str == 'harmonic_upper_bound':
+        if bt.style_id == 'harmonic_upper_bound':
             if d > bt.r0:
                 absv = d - bt.r0
                 relv = (d - bt.r0) / bt.r0
                 if relv > 0.05:
                     violations.append((bond.i, bond.j, absv, relv, str(bond_list.bond_annotations[bond_no])))
-        if bt.type_str == 'harmonic_lower_bound':
+        if bt.style_id == 'harmonic_lower_bound':
             if d < bt.r0:
                 absv = bt.r0 - d
                 relv = (bt.r0 - d) / bt.r0
@@ -1383,12 +1434,13 @@ def _serial_lammps_call(largs):
         from .myio import read_hms, write_hms
         
         # unpack arguments
-        fname, param_fname, new_fname = largs
+        fname, param_fname, new_fname, i = largs
         run_name = os.path.splitext(os.path.basename(new_fname))[0]
 
         # read parameters from disk
         with open(param_fname) as f:
             kwargs = json.load(f)
+        kwargs['i'] = i
 
 
         # read coordinates from disk
@@ -1521,7 +1573,8 @@ def bulk_minimize_single_file(parallel_client,
         # prepare arguments as a list of tuples (map wants a single argument for each call)
         pargs = [(os.path.join(workdir, '{}_{}.hms'.format(old_prefix, i)),
                   parameter_fname,
-                  os.path.join(workdir, '{}_{}.hms'.format(new_prefix, i))) for i in to_minimize] 
+                  os.path.join(workdir, '{}_{}.hms'.format(new_prefix, i)),
+                  i) for i in to_minimize] 
 
         # using ipyparallel to map functions to workers
         engine_ids = list(parallel_client.ids)
@@ -1541,8 +1594,9 @@ def bulk_minimize_single_file(parallel_client,
         # check for errors
         errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
         now_completed = [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
+        max_errors = 5
         if len(errors):
-            for i, e in errors:
+            for i, e in errors[:max_errors]:
                 logger.error('Exception returned in minimizing structure %d: %s', i, e)
                 print()
             raise RuntimeError('Unable to complete bulk_minimize_single_file()')
