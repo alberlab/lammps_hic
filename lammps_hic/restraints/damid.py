@@ -2,7 +2,6 @@ import numpy as np
 from numpy.linalg import norm
 
 from ..actdist import _get_copy_index
-from ..lammps_utils import BS, BT
 
 MAX_BONDS = 20
 

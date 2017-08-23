@@ -1,48 +1,41 @@
 import numpy as np
 import h5py
-from ..lammps_utils import BT, BS, Atom
+from ..lammps_utils import Bond, HarmonicUpperBound, ClusterCentroid
 
-def get_cluster_size(n, radii):
-    '''
-    Determine the radius of the sphere containing the cluster
+def cbrt(x):
+        return (x)**(1./3.)
 
-    Parameters
-    ----------
-        n : int 
-            number of beads in the cluster
-        radii : np.ndarray(dtype=float)
-            radii of the beads
+def get_cluster_size(radii, size_factor):
+    return cbrt(size_factor * np.sum(radii**3))
 
-    Returns
-    -------
-        float : the radius of the cluster restraint sphere
-    '''
-    return 2 * np.sqrt(n - 1) * np.average(radii)
-
-
-def apply_barcoded_cluster_restraints(system, coord, radii, cluster_file, user_args):
+def apply_barcoded_cluster_restraints(model, coord, radii, index, user_args):
+    cluster_file = user_args['bc_cluster'] 
+    size_factor = user_args['bc_cluster_size']
     struct_i = user_args['i']
+
+    if struct_i < 0:
+        raise ValueError('Barcoded cluster restraints require to specify'
+                         'a structure')
+
+    centroid_type = ClusterCentroid()
+
     with h5py.File(cluster_file) as f:
-        idxptr = f['idxptr']['()']
-        structidx = f['structidx']['()']
-        (curr_clusters, ) = np.where(structidx == struct_i)
+        idxptr = f['idxptr'][()]
+        assignment = f['assignment'][()]
+        (curr_clusters, ) = np.where(assignment == struct_i)
         for cluster_id in curr_clusters:
             start_pos = idxptr[cluster_id]
             end_pos = idxptr[cluster_id + 1]
             beads = f['data'][start_pos:end_pos][()]
-            csize = get_cluster_size(len(beads), radii[beads])
+            crad = radii[beads]
+            ccrd = coord[beads]
+            csize = get_cluster_size(crad, size_factor)
             
             # add a centroid for the cluster
-            centroid_pos = np.mean(coord[beads], axis=0)
-            centroid = system.add_atom(centroid_pos, radius=0.0) # no excluded volume
-            
-            parms = {
-                'style' : BS.HARMONIC_UPPER_BOUND,
-                'k' : 1.0,
-                'r' : csize,
-            }
+            centroid_pos = np.mean(ccrd, axis=0)
+            centroid = model.add_atom(centroid_type, xyz=centroid_pos) # no excluded volume
 
             for b in beads:
-                system.add_bond(centroid, system.atoms[b], 
-                                parms, BT.BARCODED_CLUSTER)    
+                bt = HarmonicUpperBound(k=1.0, r0=csize-radii[b])
+                model.add_bond(centroid, b, bt, Bond.BARCODED_CLUSTER)    
             

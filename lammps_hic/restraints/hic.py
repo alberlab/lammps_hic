@@ -3,7 +3,6 @@ from numpy.linalg import norm
 
 from ..lammps_utils import Bond, HarmonicUpperBound
 from ..actdist import _get_copy_index
-from ..lammps_utils import BS, BT
 
 def read_actdists(ad):
     assert(ad is not None)

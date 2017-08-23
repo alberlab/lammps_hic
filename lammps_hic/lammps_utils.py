@@ -16,6 +16,8 @@ class BondType(object):
     def __hash__(self):
         raise NotImplementedError('This is an abstract base class')
 
+    def __eq__(self, other):
+        return hash(self) == hash(other)
 
 class HarmonicUpperBound(BondType):
     '''
@@ -39,6 +41,7 @@ class HarmonicUpperBound(BondType):
 
     def __hash__(self):
         return hash((self.__class__.style_id, self.k, self.r0))
+
 
 
 class HarmonicLowerBound(BondType):
@@ -81,6 +84,7 @@ class Bond(object):
     FISH_RADIAL = 3
     FISH_PAIR = 4
     BARCODED_CLUSTER = 5
+    ENVELOPE = 6
 
     def __init__(self, b_id, bond_type, i, j, restraint_type=OTHER):
         self.id = b_id
@@ -194,7 +198,8 @@ class LammpsModel(object):
         
     def get_next_dummy(self, pos=np.array([0., 0., 0.])):
         if (self.atoms[-1].atom_type == Atom.FIXED_DUMMY and
-            self.atoms[-1].nbonds < FrozenPhantomBead.MAX_BONDS):
+            self.atoms[-1].nbonds < FrozenPhantomBead.MAX_BONDS and
+            np.all(self.atoms[-1].xyz == pos)):
                 dummy = self.atoms[-1]
         else:
             atype = FrozenPhantomBead()
@@ -228,7 +233,7 @@ class LammpsModel(object):
         if atype is None:
             atom_type.id = len(self.atom_types)
             atype = self.atom_types[atom_type] = atom_type
-        atom = Atom(atom_id, atom_type, mol_id, xyz)
+        atom = Atom(atom_id, atype, mol_id, xyz)
         self.atoms.append(atom)
         self.nmol = max(mol_id, self.nmol)
         return atom

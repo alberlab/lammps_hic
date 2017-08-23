@@ -47,14 +47,10 @@ except ImportError:
     import pickle
 
 
-from .myio import read_hss, write_hss, read_full_actdist, HtfFile
+from .myio import read_hss, write_hss, HtfFile
 from .util import monitor_progress, pretty_tdelta
 from .globals import lammps_executable, float_epsilon
-from .restraints.consecutive_beads import apply_consecutive_beads_restraints 
-from .restraints.hic import apply_hic_restraints
-from .restraints.damid import apply_damid_restraints
-from .restraints.fish import apply_fish_restraints
-from .restraints.barcoded_clusters import apply_barcoded_cluster_restraints
+from .restraints import *
 from .lammps_utils import *
 
 
@@ -69,8 +65,9 @@ ARG_DEFAULT = [
     ('occupancy', 0.2, float, 'default volume occupancy (from 0.0 to 1.0)'),
     ('actdist', None, str, 'activation distances file (ascii text)'),
     ('fish', None, str, 'fish distances file (hdf5)'),
-    ('damid', None, str, 'damid activation distances file (ascii text)')
+    ('damid', None, str, 'damid activation distances file (ascii text)'),
     ('bc_cluster', None, str, 'filename of cluster file (hdf5)'),
+    ('bc_cluster_size', 5.0, float, 'inverse of volume occupancy'),
     ('out', 'out.lammpstrj', str, 'Temporary lammps trajectory file name'),
     ('data', 'input.data', str, 'Temporary lammmps input data file name'), 
     ('lmp', 'minimize.lam', str, 'Temporary lammps script file name'), 
@@ -116,7 +113,7 @@ def validate_user_args(kwargs):
         if k not in args:
             raise ValueError('Keywords argument %s not recognized.' % k)
         if v is not None:
-            args[k] = atypes(v)
+            args[k] = atypes[k](v)
 
     if args['write'] == -1:
         args['write'] = args['mdsteps']  # write only final step
@@ -189,6 +186,8 @@ def create_lammps_data(model, user_args):
             a1 = atom_types[i]
             for j in range(i, len(atom_types)):
                 a2 = atom_types[j]
+                id1 = min(a1.id+1, a2.id+1)
+                id2 = max(a1.id+1, a2.id+1)
                 if (a1.atom_category == AtomType.BEAD and
                     a2.atom_category == AtomType.BEAD):
                     ri = a1.radius
@@ -197,14 +196,15 @@ def create_lammps_data(model, user_args):
                     A = (dc/math.pi)**2
                     #sigma = dc / 1.1224 #(2**(1.0/6.0))
                     #print(i+1, user_args['evfactor'], sigma, dc, file=f)
-                    print(ii+1, jj+1, A*user_args['evfactor'], dc, file=f)
+                    
+                    print(id1, id2, A*user_args['evfactor'], dc, file=f)
                 else:
-                    print(ii+1, jj+1, 0.0, 0.0, file=f)
+                    print(id1, id2, 0.0, 0.0, file=f)
         
 
 def create_lammps_script(model, user_args):
-    radii = [a.radius for a in model.atoms]
-    radius_to_atom_type = get_radii_to_atom_type_mapping(radii)
+    maxrad = max([at.radius for at in model.atom_types if 
+                  at.atom_category == AtomType.BEAD])
 
     with open(user_args['lmp'], 'w') as f:
         print('units                 lj', file=f)
@@ -215,17 +215,17 @@ def create_lammps_script(model, user_args):
         print('boundary              f f f', file=f)
 
         # Needed to avoid calculation of 3 neighs and 4 neighs
-        #print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
+        print('special_bonds lj/coul 1.0 1.0 1.0', file=f)
 
 
         # excluded volume
-        print('pair_style soft', 2.0 * max(radii), file=f)  # global cutoff
+        print('pair_style soft', 2.0 * maxrad, file=f)  # global cutoff
 
         print('read_data', user_args['data'], file=f)
         print('mass * 1.0', file=f)
 
         # groups atom types by atom_category
-        sortedlist = sorted(list(l.atom_types), key=lambda x: x.atom_category)
+        sortedlist = list(sorted(model.atom_types, key=lambda x: x.atom_category))
         groupedlist = {k: list(v) for k, v in groupby(sortedlist, 
                                                 key=lambda x: x.atom_category)}
 
@@ -243,9 +243,9 @@ def create_lammps_script(model, user_args):
             print('neigh_modify exclude group centroid all', file=f)
 
         print('group nonfixed type', ' '.join(centroid_types
-                                            + beads), file=f)
+                                            + bead_types), file=f)
 
-        print('neighbor', max(radii), 'bin', file=f)  # skin size
+        print('neighbor', maxrad, 'bin', file=f)  # skin size
         print('neigh_modify every 1 check yes', file=f)
         print('neigh_modify one', user_args['max_neigh'],
               'page', 20 * user_args['max_neigh'], file=f)
@@ -264,10 +264,10 @@ def create_lammps_script(model, user_args):
         print('timestep', user_args['timestep'], file=f)
 
         # Region
-        print('region mySphere sphere 0.0 0.0 0.0',
-              user_args['nucleus_radius'] + 2 * max(radii), file=f)
-        print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
-              2 * max(radii), file=f)
+        # print('region mySphere sphere 0.0 0.0 0.0',
+        #       user_args['nucleus_radius'] + 2 * maxrad, file=f)
+        # print('fix wall beads wall/region mySphere harmonic 10.0 1.0 ',
+        #       2 * maxrad, file=f)
 
         #print('pair_modify shift yes mix arithmetic', file=f)
 
@@ -475,25 +475,25 @@ def generate_input(crd, radii, index, **kwargs):
     
     # create an atom for each genome bead
     for i in range(n_genome_beads):
-        atype = AtomType(radii[i])
+        atype = DNABead(radii[i])
         model.add_atom(atom_type=atype, xyz=crd[i])
+
+    # apply restraints
+    apply_nuclear_envelope_restraints(model, crd, radii, index, args)
     
-    apply_consecutive_beads_restraints(model, index, radii, args)
+    apply_consecutive_beads_restraints(model, crd, radii, index, args)
     
     if args['actdist'] is not None:
-        actdist = read_actdists(args['actdist'])
-        apply_hic_restraints(model, crd, radii, index, actdist, args)
+        apply_hic_restraints(model, crd, radii, index, args)
 
     if args['damid'] is not None:
-        damid_ad = read_damid(args['damid'])
-        apply_damid_restraints(model, crd, radii, index, damid_ad, args)
+        apply_damid_restraints(model, crd, radii, index, args)
 
     if args['fish'] is not None:
-        apply_fish_restraints(model, crd, index, args)
+        apply_fish_restraints(model, crd, radii, index, args)
 
     if args['bc_cluster'] is not None:
-        apply_barcoded_cluster_restraints(model, coord, radii, 
-                                          args['bc_cluster'], args)
+        apply_barcoded_cluster_restraints(model, crd, radii, index, args)
 
     create_lammps_data(model, args)
     create_lammps_script(model, args)

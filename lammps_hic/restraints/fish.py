@@ -3,7 +3,6 @@ from numpy.linalg import norm
 import h5py
 
 from ..actdist import _get_copy_index
-from ..lammps_utils import BS, BT
 
 
 
