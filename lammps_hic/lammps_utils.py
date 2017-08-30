@@ -1,4 +1,5 @@
 import numpy as np
+from util import reverse_readline
 
 class BondType(object):
     '''
@@ -18,6 +19,16 @@ class BondType(object):
 
     def __eq__(self, other):
         return hash(self) == hash(other)
+
+    def get_violation(self):
+        raise NotImplementedError('This is an abstract base class')
+
+    def get_relative_violation(self):
+        raise NotImplementedError('This is an abstract base class')
+
+    def get_energy(self):
+        raise NotImplementedError('This is an abstract base class')
+    
 
 class HarmonicUpperBound(BondType):
     '''
@@ -42,6 +53,16 @@ class HarmonicUpperBound(BondType):
     def __hash__(self):
         return hash((self.__class__.style_id, self.k, self.r0))
 
+    def get_violation(self, bond_length):
+        if bond_length > self.r0:
+            return self.k*(bond_length - self.r0)
+        return 0.0
+
+    def get_relative_violation(self, bond_length):
+        return self.get_violation(bond_length) / self.r0
+
+    def get_energy(self, bond_length):
+        return self.get_violation(bond_length) * self.k
 
 
 class HarmonicLowerBound(BondType):
@@ -67,7 +88,16 @@ class HarmonicLowerBound(BondType):
     def __hash__(self):
         return hash((self.__class__.style_id, self.k, self.r0))
 
-    #def
+    def get_violation(self, bond_length):
+        if bond_length < self.r0:
+            return (self.r0 - bond_length)
+        return 0.0
+
+    def get_relative_violation(self, bond_length):
+        return self.get_violation(bond_length) / self.r0
+
+    def get_energy(self, bond_length):
+        return self.get_violation(bond_length) * self.k
 
 
 class Bond(object):
@@ -102,6 +132,17 @@ class Bond(object):
     def __eq__(self, other): 
         return self.__dict__ == other.__dict__
 
+    def get_violation(self, crds):
+        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
+        return self.bond_type.get_violation(bond_length)
+
+    def get_relative_violation(self, crds):
+        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
+        return self.bond_type.get_relative_violation(bond_length)
+
+    def get_energy(self, crds):
+        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
+        return self.bond_type.get_energy(bond_length)
 
 class AtomType(object):
     '''
@@ -208,9 +249,9 @@ class LammpsModel(object):
         return dummy
 
     def add_bond(self, i, j, bond_type, restraint_type=Bond.OTHER):
-        if isinstance(i, int):
+        if not isinstance(i, Atom):
             i = self.atoms[i]
-        if isinstance(j, int):
+        if not isinstance(j, Atom):
             j = self.atoms[j]
         btype = self.bond_types.get(bond_type, None)
         if btype is None:
@@ -238,3 +279,57 @@ class LammpsModel(object):
         self.nmol = max(mol_id, self.nmol)
         return atom
         
+
+def get_info_from_log(output):
+    ''' gets final energy, excluded volume energy and bond energy.
+    TODO: get more info? '''
+    info = {}
+    generator = reverse_readline(output)
+
+    for l in generator:
+        if l[:9] == '  Force t':
+            ll = next(generator)
+            info['final-energy'] = float(ll.split()[2])
+            break
+
+    for l in generator:
+        if l[:4] == 'Loop':
+            ll = next(generator)
+            _, _, epair, ebond = [float(s) for s in ll.split()]
+            info['pair-energy'] = epair
+            info['bond-energy'] = ebond
+            break
+
+    for l in generator:
+        if l[:4] == 'Loop':
+            # MD minimization
+            info['md-time'] = float(l.split()[3])
+    
+    # EN=`grep -A 1 "Energy initial, next-to-last, final =" $LAMMPSLOGTMP \
+    # | tail -1 | awk '{print $3}'`
+    return info
+
+def get_last_frame(fh):
+    atomlines = []
+    for l in reverse_readline(fh):
+        if 'ITEM: ATOMS' in l:
+            v = l.split()
+            ii = v.index('id') - 2
+            ix = v.index('x') - 2
+            iy = v.index('y') - 2
+            iz = v.index('z') - 2
+            break
+        atomlines.append(l)
+
+    crds = np.empty((len(atomlines), 3))
+    for l in atomlines:
+        v = l.split()
+        i = int(v[ii]) - 1  # ids are in range 1-N
+        x = float(v[ix])
+        y = float(v[iy])
+        z = float(v[iz])
+        crds[i][0] = x
+        crds[i][1] = y
+        crds[i][2] = z
+
+    return crds

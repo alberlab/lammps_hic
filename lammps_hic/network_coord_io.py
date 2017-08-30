@@ -23,12 +23,11 @@ logger.setLevel(logging.DEBUG)
 
 
 def cfg_name(fname):
-    return os.path.splitext(fname)[0] + '.coord_server_cfg'
-
+        return fname + '.tmp_cfg'
 
 class CoordServer(object):
     def __init__(self, fname, mode='r+', shape=(0, 0, 3), dtype='float32', 
-                 max_memory=int(1e9), host="*", port=13457):
+                 max_memory='2GB', host="*", port=13457):
         self.fp = PopulationCrdFile(fname, mode, shape, dtype, max_memory)
         self.myip = socket.gethostbyname(socket.getfqdn())
         self.host = host
@@ -138,6 +137,7 @@ class CoordServer(object):
 
 
 class CoordClient(object):
+
     def __init__(self, fname, wait_for_config=5):
         cfgfile = cfg_name(fname)
         config = None
@@ -204,8 +204,181 @@ class CoordClient(object):
         self.socket.close()
         self.context.term()
 
-        
-root = logging.getLogger()
-for handler in root.handlers[:]:
-    root.removeHandler(handler)
-root.addHandler(logging.StreamHandler())
+
+import sqlite3
+class SqliteServer(object):
+    READY = 1
+    FAIL = -1
+    def __init__(self, dbfname, sqlsetup, host="*", port=13558):
+        try:
+            self.dbfname = dbfname
+            self.db = sqlite3.connect(dbfname)
+            cur = self.db.cursor()
+            cur.execute(sqlsetup)
+            self.myip = socket.gethostbyname(socket.getfqdn())
+            self.host = host
+            self.port = port
+            self.serversocket = None
+            self.th = threading.Thread(target=self.run)
+            config = {
+                'ip' : self.myip,
+                'port' : self.port
+            }
+            self.cfgfile = self.cfg_name(dbfname)
+            with open(self.cfgfile, 'w') as f:
+                json.dump(config, f)
+            self.status = SqliteServer.READY
+        except:
+            self.status = SqliteServer.FAIL
+            raise
+
+    def recv(self):
+        rawmessage = self.serversocket.recv()
+        return pickle.loads(rawmessage)
+
+    def send(self, obj):
+        self.serversocket.send(pickle.dumps(obj))
+
+    def start(self):
+        self.th.start()
+
+    def run(self):
+        if self.status != self.READY:
+            raise RuntimeError('DB setup failed')
+        self.context = zmq.Context()
+        self.serversocket = self.context.socket(zmq.REP)
+        cur = self.db.cursor()
+        try:
+            addr = 'tcp://' + self.host + ':' + str(self.port)
+            self.serversocket.bind(addr)
+            logger.info('server started and listening on %s' % addr)
+            running = True
+            while running:
+                req = self.recv()
+                try:
+                    reqtype, query, args = req 
+                    # fetchall
+                    if reqtype == 'fa':
+                        cur.execute(query, args)
+                        self.send([0, cur.fetchall()])
+                    # fetchmany
+                    elif reqtype == 'fo':
+                        cur.execute(query, args)
+                        self.send([0, cur.fetchone()])
+                    elif reqtype == 'ex':
+                        cur.execute(query, args)
+                        self.send([0])
+                    #quit
+                    elif reqtype == 'q':
+                        logger.debug('Quit signal received. Exiting...')
+                        self.send([0])
+                        os.remove(self.cfgfile)
+                        running = False
+
+                    else:
+                        self.send([-1, 'Incorrect request %s', req[0]])
+                except:
+                    etype, value, tb = sys.exc_info()
+                    logger.error(traceback.format_exception(etype, value, tb))
+                    infostr = ''.join(traceback.format_exception(etype, value, tb))
+                    if not self.serversocket.closed:
+                        self.send([-1, infostr])
+        finally:
+            self.serversocket.setsockopt( zmq.LINGER, 0 )
+            self.serversocket.close()
+            self.context.term()
+
+    def close(self):
+        tmpcontext = zmq.Context()
+        socket = tmpcontext.socket(zmq.REQ)
+        try:
+            addr = 'tcp://' + self.myip + ':' + str(self.port)
+            socket.connect(addr)
+            socket.send(pickle.dumps('q'))
+            msg = pickle.loads(socket.recv())
+            if msg[0] != 0:
+                raise RuntimeError('Error on closing instance')
+            self.th.join()
+        finally:
+            socket.setsockopt( zmq.LINGER, 0 )
+            socket.close()
+            tmpcontext.term()
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        if self.th.is_alive():
+            self.close()
+
+class SqliteClient(object):
+
+    def __init__(self, fname, wait_for_config=5):
+        cfgfile = cfg_name(fname)
+        config = None
+        with open(cfgfile, 'r') as f:
+            config = json.load(f)
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.REQ)
+        addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
+        self.socket.connect(addr)
+
+    def recv(self):
+        data = pickle.loads(self.socket.recv())
+        if data[0] != 0:
+            logger.error('Error from server: %s', data)
+            raise RuntimeError('Request Error, server returned: %s' % data)
+        if len(data) >= 2: # some get request
+            return data[1]
+        return True
+
+    def send(self, obj):
+        self.socket.send(pickle.dumps(obj))
+
+    def fetchall(self, query, args=tuple()):
+        self.send([
+            'fa',
+            query,
+            args,
+        ])
+        return self.recv()
+
+    def fetchone(self, query, args=tuple()):
+        self.send([
+            'fo',
+            query,
+            args,
+        ])
+        return self.recv()
+
+    def execute(self, query, args=tuple()):
+        self.send([
+            'ex',
+            query,
+            args,
+        ])
+        return self.recv()
+    
+    def shutdown(self):
+        self.send([
+            'q',
+            '',
+            (),
+        ])
+        return self.recv()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.socket.setsockopt( zmq.LINGER, 0 )
+        self.socket.close()
+        self.context.term()
+
+
+
+# root = logging.getLogger()
+# for handler in root.handlers[:]:
+#     root.removeHandler(handler)
+# root.addHandler(logging.StreamHandler())

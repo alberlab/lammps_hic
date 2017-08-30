@@ -1,24 +1,42 @@
 import numpy as np
 from numpy.linalg import norm
+import os
 
 from ..lammps_utils import Bond, HarmonicUpperBound
 from ..actdist import _get_copy_index
 
+
 def read_actdists(ad):
+    '''
+    Reads activation distances.
+
+    Activation distances are a list/array of records.
+    Every record consists of:
+
+    - i (int): first bead index
+
+    - j (int): second bead index
+
+    - pwish (float): the desired contact probability
+
+    - actdist (float): the activation distance
+
+    - pclean (float): the corrected probability from the iterative correction
+
+    - pnow (float): the current contact probability
+    '''
     assert(ad is not None)
+    columns =[('i', int),
+              ('j', int),
+              ('pwish', float),
+              ('actdist', float),
+              ('pclean', float),
+              ('pnow', float)]
     actdists = []
     if isinstance(ad, str) or isinstance(ad, unicode):
-        if ad[-7:] == ".txt.gz":
-            import gzip
-            with gzip.open(ad) as f:
-                for line in f:
-                    try:
-                        i, j, pwish, d, p, pnow = line.split()
-                    except ValueError:
-                        continue
-                    actdists.append((int(i), int(j), pwish, float(d), p, pnow))
-        elif os.path.getsize(ad) > 0:
-            actdists = read_full_actdist(ad)
+        ad = np.genfromtxt(ad, dtype=columns)
+        if ad.shape == ():
+            ad = np.array([ad])
     else:
         actdists = ad
     return actdists

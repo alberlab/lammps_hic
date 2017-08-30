@@ -20,12 +20,12 @@ def apply_barcoded_cluster_restraints(model, coord, radii, index, user_args):
     centroid_type = ClusterCentroid()
 
     with h5py.File(cluster_file) as f:
-        idxptr = f['idxptr'][()]
+        indptr = f['indptr'][()]
         assignment = f['assignment'][()]
         (curr_clusters, ) = np.where(assignment == struct_i)
         for cluster_id in curr_clusters:
-            start_pos = idxptr[cluster_id]
-            end_pos = idxptr[cluster_id + 1]
+            start_pos = indptr[cluster_id]
+            end_pos = indptr[cluster_id + 1]
             beads = f['data'][start_pos:end_pos][()]
             crad = radii[beads]
             ccrd = coord[beads]

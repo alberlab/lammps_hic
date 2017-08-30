@@ -40,6 +40,7 @@ from io import StringIO
 from myio import Violations
 from itertools import groupby
 
+
 from subprocess import Popen, PIPE
 try:
     import cPickle as pickle
@@ -48,11 +49,11 @@ except ImportError:
 
 
 from .myio import read_hss, write_hss, HtfFile
-from .util import monitor_progress, pretty_tdelta
+from .util import monitor_progress, pretty_tdelta, require_vars, resolve_templates, remove_if_exists
 from .globals import lammps_executable, float_epsilon
 from .restraints import *
 from .lammps_utils import *
-
+from .parallel_controller import ParallelController
 
 __author__  = "Guido Polles"
 __license__ = "GPL"
@@ -120,22 +121,6 @@ def validate_user_args(kwargs):
     
     return args
 
-
-
-def read_damid(damid):
-    assert(damid is not None)
-    if isinstance(damid, str) or isinstance(damid, unicode):
-        if os.path.getsize(damid) > 0:
-            damid_actdists = np.genfromtxt(damid,
-                                           usecols=(0, 1, 2),
-                                           dtype=(int, float, float))
-            if damid_actdists.shape == ():
-                damid_actdists = [damid_actdists]
-        else:
-            damid_actdists = []
-    return damid_actdists
-
-
 def create_lammps_data(model, user_args):
     
     n_atom_types = len(model.atom_types)
@@ -201,7 +186,6 @@ def create_lammps_data(model, user_args):
                 else:
                     print(id1, id2, 0.0, 0.0, file=f)
         
-
 def create_lammps_script(model, user_args):
     maxrad = max([at.radius for at in model.atom_types if 
                   at.atom_category == AtomType.BEAD])
@@ -272,7 +256,7 @@ def create_lammps_script(model, user_args):
         #print('pair_modify shift yes mix arithmetic', file=f)
 
         # outputs:
-        print('dump   id beads custom',
+        print('dump   crd_dump all custom',
               user_args['write'],
               user_args['out'],
               'id type x y z fx fy fz', file=f)
@@ -302,7 +286,6 @@ def create_lammps_script(model, user_args):
         print('min_style cg', file=f)
         print('minimize', user_args['etol'], user_args['ftol'],
               user_args['max_cg_iter'], user_args['max_cg_eval'], file=f)
-
 
 def generate_input(crd, radii, index, **kwargs):
     '''
@@ -500,188 +483,81 @@ def generate_input(crd, radii, index, **kwargs):
 
     return model
 
-
-def _check_violations(bond_list, crd):
-    violations = Violations()
-    for bond_no, bond in enumerate(bond_list.bonds):
-        bt = bond_list.bond_types[bond.bond_type]
-        d = norm(crd[bond.i] - crd[bond.j])
-        if bt.type_str == 'harmonic_upper_bound':
-            if d > bt.r0:
-                absv = d - bt.r0
-                relv = (d - bt.r0) / bt.r0
-                if relv > 0.05:
-                    violations.add(bond.i, bond.j, absv, relv, bond_list.bond_annotations[bond_no])
-        if bt.type_str == 'harmonic_lower_bound':
-            if d < bt.r0:
-                absv = bt.r0 - d
-                relv = (bt.r0 - d) / bt.r0
-                if relv > 0.05:
-                    violations.add(bond.i, bond.j, absv, relv, bond_list.bond_annotations[bond_no])
+def _check_violations(model, crd, i, tol=0.05):
+    violations = []
+    for bond in model.bonds:
+        rv = bond.get_relative_violation(crd)
+        if rv > tol:
+            bt = bond.bond_type
+            violations.append((i, bond.restraint_type, bond.i, bond.j,
+                               bt.style_id, rv))
     return violations
 
-
-def _reverse_readline(fh, buf_size=8192):
-    """a generator that returns the lines of a file in reverse order"""
-    segment = None
-    offset = 0
-    fh.seek(0, os.SEEK_END)
-    file_size = remaining_size = fh.tell()
-    while remaining_size > 0:
-        offset = min(file_size, offset + buf_size)
-        fh.seek(file_size - offset)
-        buffer = fh.read(min(remaining_size, buf_size))
-        remaining_size -= buf_size
-        lines = buffer.split('\n')
-        # the first line of the buffer is probably not a complete line so
-        # we'll save it and append it to the last line of the next buffer
-        # we read
-        if segment is not None:
-            # if the previous chunk starts right from the beginning of line
-            # do not concact the segment to the last line of new chunk
-            # instead, yield the segment first
-            if buffer[-1] is not '\n':
-                lines[-1] += segment
-            else:
-                yield segment
-        segment = lines[0]
-        for index in range(len(lines) - 1, 0, -1):
-            if len(lines[index]):
-                yield lines[index]
-    # Don't yield None if the file was empty
-    if segment is not None:
-        yield segment
-
-
-def get_info_from_log(output):
-    ''' gets final energy, excluded volume energy and bond energy.
-    TODO: get more info? '''
-    info = {}
-    generator = _reverse_readline(output)
-
-    for l in generator:
-        if l[:9] == '  Force t':
-            ll = next(generator)
-            info['final-energy'] = float(ll.split()[2])
-            break
-
-    for l in generator:
-        if l[:4] == 'Loop':
-            ll = next(generator)
-            _, _, epair, ebond = [float(s) for s in ll.split()]
-            info['pair-energy'] = epair
-            info['bond-energy'] = ebond
-            break
+def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm', 
+                    check_violations=True, keep_temporary_files=False,
+                    **kwargs):
+    '''
+    Lammps interface for minimization.
     
-    # EN=`grep -A 1 "Energy initial, next-to-last, final =" $LAMMPSLOGTMP \
-    # | tail -1 | awk '{print $3}'`
-    return info
-
-
-def get_last_frame(fh):
-    atomlines = []
-    for l in _reverse_readline(fh):
-        if 'ITEM: ATOMS' in l:
-            v = l.split()
-            ii = v.index('id') - 2
-            ix = v.index('x') - 2
-            iy = v.index('y') - 2
-            iz = v.index('z') - 2
-            break
-        atomlines.append(l)
-
-    crds = np.empty((len(atomlines), 3))
-    for l in atomlines:
-        v = l.split()
-        i = int(v[ii]) - 1  # ids are in range 1-N
-        x = float(v[ix])
-        y = float(v[iy])
-        z = float(v[iz])
-        crds[i][0] = x
-        crds[i][1] = y
-        crds[i][2] = z
-
-    return crds
-
-
-def mark_complete(i, fname):
-    '''
-    marks a minimization as completed
-    '''
-    dtype = np.int32
-    with open(fname, 'r+b') as f:
-        f.seek(i*dtype.itemsize)
-        np.int32(1).tofile(f)
-
-
-def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
-    '''
-    Actual minimization wrapper.
-    
-    After creating the input and data files for lammps,
+    It first creates input and data files for lammps, then
     runs the lammps executable in a process (using subprocess.Popen).
 
-    This function is internally called by the higher level 
-    parallel wrappers.
-
     When the program returns, it parses the output and returns the 
-    results.
+    new coordinates, along informations on the run and on violations.
 
-    :Arguments:
-        *crd (numpy array)*
-            Initial coordinates (n_beads x 3 array).
+    The files created are 
+    - input file: `tmp_files_dir`/`run_name`.lam
+    - data file: `tmp_files_dir`/`run_name`.input
+    - trajectory file: `tmp_files_dir`/`run_name`.lammpstrj
 
-        *radii (list of floats)*
-            Radius for each particle in the system
+    The function tries to remove the temporary files after the run, both in 
+    case of failure and success (unless `keep_temporary_files` is set to 
+    `False`). If the interpreter is killed without being able to catch 
+    exceptions (for example because of a walltime limit) some files could be 
+    left behind.
 
-        *chrom (list of strings)*
-            Chromosome name for each particle. Note that chain
-            breaks are determined by changes in the chrom
-            value
+    Parameters
+    ----------
+    crd : numpy.ndarray 
+        Initial coordinates (n_beads x 3 array).
+    radii : numpy.ndarray
+        Radius for each particle in the system.
+    index : `alabtools.Index`
+        Index for the system.
+    run_name : str
+        Name of the run. It determines only the name of temporary files.
+    tmp_files_dir : str
+        Location of temporary files. Needs writing permissions. The default 
+        value, /dev/shm, is usually a in-memory file system, useful to 
+        share data between processes without the overhead of actually 
+        writing to a physical disk.
+    check_violations : bool
+        Performs a check on the violations of the assigned bonds. If set 
+        to `False`, the check is skipped and the violation output will be 
+        an empty list.
+    keep_temporary_files : bool
+        If set to `True`, does not try to remove the temporary files 
+        generated by the run.
+    \*\*kwargs : dict 
+        Optional keyword arguments for minimization. 
+        See docs for `lammps.generate_input`.
 
-        *run_name (string)* 
-            Name of the run - determines only the name of temporary 
-            files.
+    Returns
+    -------
+    new_crd : numpy ndarray 
+        Coordinates after minimization.
+    info : dict 
+        Dictionary with summarized info for the run, as returned 
+        by `lammps.get_info_from_log`.
+    violations : list
+        List of violations. If the `check_violations` parameter is set 
+        to `False`, returns an empty list.
 
-        *tmp_files_dir (string)*
-            Location of temporary files. Of course, it needs to be 
-            writable. 
-
-            The default value, **/dev/shm** is usually a in-memory file 
-            system, useful to share data between processes without
-            actually writing to a physical disk.
-
-            The function checks for exceptions and try to remove
-            the temporary files. If the interpreter is killed without
-            being able to catch exceptions (for example because of
-            a walltime limit) some files could be left behind.
-
-        *log_dir (string)*
-            Deprecated, no effect at all.
-
-        *check_violations (bool)*
-            Perform a check on the violations on the assigned 
-            bonds. If set to **False**, the check is skipped
-            and the violation output will be an empty list.
-
-        *\*\*kwargs*
-            Optional minimization arguments. (see lammps.generate_input)
-
-    :Output:
-        *new_crd (numpy ndarray)*
-            Coordinates after minimization.
-
-        *info (dict)*
-            Dictionary with summarized info for the run, as returned by
-            lammps.get_info_from_log.
-
-        *violations (list)*
-            List of violations. If the check_violations parameter is set
-            to False, returns an empty list.
-
-    Exceptions:
-        If the lammps executable return code is different from 0, it
-        raises a RuntimeError with the contents of the standard error.
+    Raises
+    ------
+    RuntimeError 
+        If the lammps executable return code is different from 0, it raises 
+        a RuntimeError with the contents of the standard error.
     '''
 
     data_fname = os.path.join(tmp_files_dir, run_name + '.data')
@@ -717,667 +593,223 @@ def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm', log_d
         with open(traj_fname, 'r') as fd:
             new_crd = get_last_frame(fd)
 
-        if os.path.isfile(data_fname):
-            os.remove(data_fname)
-        if os.path.isfile(script_fname):
-            os.remove(script_fname)
-        if os.path.isfile(traj_fname):
-            os.remove(traj_fname)
+
+        if not keep_temporary_files:
+            if os.path.isfile(data_fname):
+                os.remove(data_fname)
+            if os.path.isfile(script_fname):
+                os.remove(script_fname)
+            if os.path.isfile(traj_fname):
+                os.remove(traj_fname)
 
     except:
-        if os.path.isfile(data_fname):
-            os.remove(data_fname)
-        if os.path.isfile(script_fname):
-            os.remove(script_fname)
-        if os.path.isfile(traj_fname):
-            os.remove(traj_fname)
+        if not keep_temporary_files:
+            if os.path.isfile(data_fname):
+                os.remove(data_fname)
+            if os.path.isfile(script_fname):
+                os.remove(script_fname)
+            if os.path.isfile(traj_fname):
+                os.remove(traj_fname)
         raise
 
     if check_violations:
-        if info['bond-energy'] > float_epsilon:
-            violations = _check_violations(system, new_crd)
-        else: 
-            violations = []
-        return new_crd, info, violations
+        violations = _check_violations(system, new_crd, i)
+    else: 
+        violations = []
+    return new_crd, info, violations
+
+    
+def _setup_and_run_task(i):
+    '''
+    Serial function to be mapped in parallel. //
+    It is a wrapper intended to be used only internally by the parallel map
+    function.
+    Checks global variables, resolve the templates, obtains input data,
+    runs the minimization routines and finally communicates back results.
+
+    Parameters
+    ---------- 
+    i : int
+        number of the structure 
+    
+    '''
+
+    # importing here so it will be called on the parallel workers
+    from .network_coord_io import CoordClient
+    from alabtools.utils import HssFile
+    from .network_sqlite import SqliteClient
+    
+    # check that all the necessary varaibles have been set
+    require_vars(['lammps_args', 'input_crd', 'output_crd', 'input_hss',
+                  'str_templates', 'status_db', 
+                  'check_violations', 'violations_db'])
+
+    require_vars(['run_name'], str_templates)
+
+    tmp_vars = resolve_templates(str_templates, [i])
+    run_name = tmp_vars['run_name']
+
+    # add i as a lammps argument
+    lammps_args['i'] = i    
+
+    # reads radii and index from hss
+    with HssFile(input_hss, 'r') as f:
+        radii = f.radii
+        index = f.index
+
+    # connects to the coordinates server
+    with CoordClient(input_crd) as f:
+        crd = f.get_struct(i)
+    
+    # connects to the status server
+    status = SqliteClient(status_db)
+
+    if check_violations:
+        violations_cl = SqliteClient(violations_db)
+
+    # perform minimization
+    new_crd, info, violations = lammps_minimize(crd, radii, index, run_name, **lammps_args)
+    
+    # outputs coordinates
+    with CoordClient(output_crd) as f:
+        f.set_struct(i, new_crd)
+
+    if check_violations and violations:
+        violations_cl.executemany('INSERT INTO violations VALUES ' +
+                                  '(?, ?, ?, ?, ?, ?)', violations)
+
+    # set as complete 
+    status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?, ?)', 
+                   (i, int(time.time()), info['final-energy'],
+                    info['pair-energy']), info['bond-energy'],
+                    info['md-time'])
+
+def minimize_population(run_name, input_hss, input_crd, output_crd,
+                        n_struct, workdir='.', tmp_files_dir='/dev/shm',
+                        ignore_restart=False, log=None, lammps_args={},
+                        check_violations=False, max_memory='2GB'):
+    '''
+    Uses ipyparallel to minimize a population of structures.
+
+    Parameters
+    ----------
+        *parallel_client (ipyparallel.Client instance)* 
+            The ipyparallel.Client instance on which
+
+        *old_prefix (string)*
+            The function will search for files named 
+            *old_prefix_<n>.hms* in the working directory, with *n*
+            in the range 0, ..., *n_struct*
+
+        *new prefix (string)*
+            After minimization, *n_struct* new files 
+            named *new_prefix_<n>.hms* will be written to the
+            working directory
+
+        *n_struct (int)*
+            Number of structures in the population
+
+        *workdir (string)*
+            Set the working directory where the hms files will
+            be found and written.
+
+        *tmp_files_dir (string)*
+            Directory where to store temporary files
+
+        *log_dir (string)*
+            Eventual errors will be dumped to this directory
+
+        *check_violations (bool)*
+            If set to False, skip the violations check
+
+        *ignore_restart (bool)*
+            If set to True, the function will not check the
+            presence of files named *new_prefix_<n>.hms*
+            in the working directory. All the runs will be 
+            re-sent and eventual files already present 
+            will be overwritten.
+
+        *\*\*kwargs*
+            Other keyword arguments to pass to the minimization
+            process. See lammps.generate_input documentation for
+            details
+
+    :Output:
+        *now_completed*
+            Number of completed minimizations in this call
+
+        *n_violated*
+            Number of structures with violations in this call
+
+        Additionally, *now_completed* files 
+        named *new_prefix_<n>.hms*
+        will be written in the *work_dir* directory.
+    
+    :Exceptions:
+        If one or more of the minimizations
+        fails, it will raise a RuntimeError.
+    '''
+
+    logger = logging.getLogger('minimize_population()')
+    logger.setLevel(logging.DEBUG)
+
+    # Decide file names
+    ndigit = len(str(n_struct))
+    status_db = run_name + '.status.db'
+    violations_db = run_name + '.violations.db'
+    str_templates = {
+        'run_name' = run_name + '-{0:0#d}'.replace('#',str(ndigit))
+    }
+
+    pc = ParallelController(name=run_name, 
+                            logfile=log, 
+                            serial_fun=_setup_and_run_task)
+
+    # set the variables on the workers
+    pc.set_global('lammps_args', lammps_args)
+    pc.set_global('input_crd', input_crd)
+    pc.set_global('output_crd', output_crd)
+    pc.set_global('input_hss', input_hss)
+    pc.set_global('str_templates', str_templates)
+    pc.set_global('status_db', status_db)
+    pc.set_global('violations_db', violations_db)
+    pc.set_global('check_violations', check_violations)
+
+    # prepare i/o servers
+    violations_setup = ('CREATE TABLE violations (struct INT, '
+        'restraint_type INT, i INT, j INT, style INT, rv REAL)')
+    status_setup = ('CREATE TABLE completed (struct INT, '
+        'timestamp INT, efinal REAL, epair REAL, ebond REAL, '
+        'mdtime REAL)')
+
+    incrd_srv = CoordServer(input_crd, mode='r', max_memory=max_memory)
+
+    if ignore_restart:
+        logger.info('Ignoring completed runs.')
+        openmode = 'w'
     else:
-        return new_crd, info, []
-
-
-# closure for parallel mapping
-def parallel_fun(radius, chrom, tmp_files_dir='/dev/shm', log_dir='.', check_violations=True, **kwargs):
-    def inner(pargs):
-        try:
-            crd, run_name = pargs
-            return lammps_minimize(crd,
-                                   radius,
-                                   chrom,
-                                   run_name,
-                                   tmp_files_dir=tmp_files_dir,
-                                   log_dir=log_dir,
-                                   check_violations=check_violations,
-                                   **kwargs)
-        except:
-            import sys
-            return (None, str(sys.exc_info()))
-    return inner
-
-
-def bulk_minimize(parallel_client,
-                  crd_fname,
-                  prefix='minimize',
-                  tmp_files_dir='/dev/shm',
-                  log_dir='.',
-                  check_violations=True,
-                  ignore_restart=False,
-                  **kwargs):    
-    try:
-        logger = logging.getLogger()
-
-        logger.debug('bulk_minimize() entry')
-
-        engine_ids = list(parallel_client.ids)
-        parallel_client[:].use_cloudpickle()
-
-        logger.debug('bulk_minimize(): reading data')
-        crd, radii, chrom, n_struct, n_bead = read_hss(crd_fname)
-        logger.debug('bulk_minimize(): done reading data')
-
-        lbv = parallel_client.load_balanced_view(engine_ids)
-
-        if ignore_restart:
-            to_minimize = list(range(n_struct))
-            completed = []
-        else:
-            if os.path.isfile(prefix + '.incomplete.pickle'):
-                logger.info('bulk_minimize(): Found restart file.')
-                with open(prefix + '.incomplete.pickle', 'rb') as pf:
-                    completed, errors = pickle.load(pf)
-                    to_minimize = [i for i, e in errors]
-                logger.info('bulk_minimize(): %d structures yet to minimize', len(to_minimize))
-            else:
-                to_minimize = list(range(n_struct))
-                completed = []
-
-        logger.debug('bulk_minimize(): preparing arguments and function')
-        pargs = [(crd[i], prefix + '.' + str(i)) for i in to_minimize] 
-        f = parallel_fun(radii, chrom, tmp_files_dir, log_dir, check_violations=check_violations, **kwargs)
-        
-        logger.info('bulk_minimize(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
-
-        ar = lbv.map_async(f, pargs)
-
-        logger.debug('bulk_minimize(): map_async sent.')
-
-        monitor_progress('bulk_minimize() - %s' % prefix, ar)
-
-        logger.info('bulk_minimize(): Done')
-
-        results = list(ar.get())
-
-        ar = None
-
-        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
-        completed += [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
-        completed = list(sorted(completed))
-
-        if len(errors):
-            for i, e in errors:
-                logger.error('Exception returned in minimizing structure %d: %s', i, e)
-            logger.info('Saving partial results to %s.incomplete.pickle')
-            with open(prefix + '.incomplete.pickle', 'wb') as pf:
-                pickle.dump((completed, errors), pf, pickle.HIGHEST_PROTOCOL)
-            raise RuntimeError('Unable to complete bulk_minimize()')
-
-        # We finished lammps runs here
-        new_crd = np.array([x for i, (x, _, _) in completed])
-
-        if os.path.isfile(prefix + '.incomplete.pickle'):
-            os.remove(prefix + '.incomplete.pickle')
-
-        energies = np.array([info['final-energy'] for i, (_, info, _) in completed])
-        n_violated = 0
-        for i, r in completed:
-            n_violated += 1 
-
-        logger.info('%d structures with violations over %d structures',
-                     n_violated,
-                     len(completed))
-        
-        write_hss(prefix + '.hss', new_crd, radii, chrom)
-        np.savetxt(prefix + '_energies.dat', energies)
-        return completed
+        openmode = 'r+'
     
-    except:
-        logger.error('bulk_minimization() failed', exc_info=True)
-        raise
+    outcrd_srv = CoordServer(output_crd, mode=openmode, shape=incrd_srv.shape, 
+                             max_memory=max_memory)
+    violations_srv = SqliteServer(violations_db, violations_setup, mode=openmode)
+    status_srv = SqliteServer(status_db, status_setup, mode=openmode)
 
+    incrd_srv.start()
+    outcrd_srv.start()
+    violations_srv.start()
+    status_srv.start()
     
-def _serial_lammps_call_net(iargs):
-    '''
-    Serial function to be mapped in parallel. //
-    It is intended to be used only internally by parallel routines.
+    # check if we have already completed tasks
+    with SqliteClient(status_db) as clt:
+        completed = clt.fetchall('SELECT struct from completed')
+    to_process = [x for x in range(n_struct) if x not in completed]
+    logger.info('%d jobs completed, %d jobs to be submitted.', 
+                len(completed), len(to_process))
+
+    # map the jobs to the workers
+    pc.args = to_process
+    pc.submit()
+
+    logger.info('Run %s completed', run_name)
 
-    Parameters
-    ---------- 
-        iargs (tuple): contains the following items:
-            - fname_from (string): the path to the memory map containing the
-                original coordinates
-            - fname_to (string): the path to the memory map containing the 
-                final coordinates
-            - fname_param (string): the path to the parameters file
-            - struct_id (int): the id of the structure to perform the
-                minimization on
-    
-    Returns
-    -------
-        oargs (tuple): contains the following items:
-            - returncode (int): 0 if success, None otherwise
-            - info (dict): dictionary of info returned by lammps_minimize. 
-                If the run fails, info is set to the formatted traceback
-                string
-            - n_violations (int): Number of violated restraint at the end of 
-                minimization. 
-    '''
-
-    try:
-        # importing here so it will be called on the parallel workers
-        import json
-        import traceback
-        from .network_coord_io import CoordClient
-        from alabtools.utils import HssFile
-        
-        # unpack arguments
-        param_fname, struct_id = iargs
-        with open(param_fname) as f:
-            kwargs = json.load(f)
-        
-        input_hss = kwargs.pop('input_hss')
-        input_crd = kwargs.pop('input_crd')
-        output_crd = kwargs.pop('output_crd')
-        run_name = kwargs.pop('run_name')
-        status_annotations = '.' + output_crd + '.status'
-
-        # read file
-        with HssFile(input_hss, 'r') as f:
-            radii = f.radii
-            index = f.index
-
-        with CoordClient(input_crd) as f:
-            crd = f.get_struct(i)
-        
-        # perform minimization
-        new_crd, info, violations = lammps_minimize(crd, radii, index, run_name, **kwargs)
-        
-        with CoordClient(output_crd) as f:
-            f.set_struct(i, new_crd)
-
-        mark_complete(i, status_annotations)
-
-        return (0, info, len(violations))
-
-    except:
-        import sys
-        etype, value, tb = sys.exc_info()
-        infostr = ''.join(traceback.format_exception(etype, value, tb))
-        return (None, infostr, 0)
-
-
-
-def _serial_lammps_call(iargs):
-    '''
-    Serial function to be mapped in parallel. //
-    It is intended to be used only internally by parallel routines.
-
-    Parameters
-    ---------- 
-        iargs (tuple): contains the following items:
-            - fname_from (string): the path to the memory map containing the
-                original coordinates
-            - fname_to (string): the path to the memory map containing the 
-                final coordinates
-            - fname_param (string): the path to the parameters file
-            - struct_id (int): the id of the structure to perform the
-                minimization on
-    
-    Returns
-    -------
-        oargs (tuple): contains the following items:
-            - returncode (int): 0 if success, None otherwise
-            - info (dict): dictionary of info returned by lammps_minimize. 
-                If the run fails, info is set to the formatted traceback
-                string
-            - n_violations (int): Number of violated restraint at the end of 
-                minimization. 
-    '''
-
-    try:
-        # importing here so it will be called on the parallel workers
-        import json
-        import traceback
-        import os
-        from os.path import splitext, basename
-        from .myio import read_hms, write_hms, HtfFile
-        from alabtools.utils import HssFile
-        from lazyio import PopulationCrdFile
-        
-        # unpack arguments
-        xin, param_fname, xout, run_name = iargs
-        
-        if isinstance(xin, str):
-            # for bw compatibility
-            crd, radii, chrom, n_struct, n_bead = read_hms(xin)
-
-        elif isinstance(xin, list) or isinstance(xin, tuple):
-            fname = xin[0]
-            base, ext = splitext(basename(fname))
-            if ext == '.hts':
-                grp = xin[1]
-                with HtfFile(fname, 'r') as f:
-                    crd = f.get_coordinates(grp)
-                    radii = f.radii
-                    chrom = f.index.chrom
-            elif ext == '.bindat':
-                hssf = xin[1]
-                i = xin[2]
-                with HssFile(hssf, 'r') as f:
-                    radii = f.radii
-                    chrom = f.index.chrom 
-                with PopulationCrdFile(fname, 'r') as f:
-                    crd = f.get_struct(i)
-            else:
-                raise ValueError('Unknown input format')
-        else:
-            raise ValueError('Wrong argument format')
-
-        # read parameters from disk
-        with open(param_fname) as f:
-            kwargs = json.load(f)
-
-        # perform minimization
-        new_crd, info, violations = lammps_minimize(crd, radii, chrom, run_name, **kwargs)
-        
-        # write coordinates to disk asyncronously and return run info
-        #ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        #ex.submit(write_hms, new_fname, new_crd, radii, chrom, violations, info)
-        if isinstance(xout, str):
-            write_hms(xout, new_crd, radii, chrom, violations, info)
-            os.chmod(xout, 0o664)
-        elif isinstance(xout, list) or isinstance(xout, tuple):
-            fname = xout[0]
-            base, ext = splitext(basename(fname))
-            if ext == '.hts':
-                grp = xout[1]
-                with HtfFile(fname) as f:
-                    try:
-                        f[grp]
-                    except KeyError:
-                        f.create_group(grp)
-                    f.set_coordinates(grp, new_crd)
-                    f.set_violations(grp, violations)
-                    f.set_info(grp, info)
-            elif ext == '.bindat':
-                i = xout[1]
-                with PopulationCrdFile(fname) as f:
-                    f.set_struct(i, new_crd)
-            else:
-                raise ValueError('Unknown output format')
-        else:
-            raise ValueError('Wrong argument format')
-            
-
-
-        return (0, info, len(violations))
-
-    except:
-        import sys
-        etype, value, tb = sys.exc_info()
-        infostr = ''.join(traceback.format_exception(etype, value, tb))
-        return (None, infostr, 0)
-
-    
-
-def bulk_minimize_single_file(parallel_client,
-                              input_hss,
-                              input_crd,
-                              output_crd,
-                              n_struct,
-                              workdir='.',
-                              tmp_files_dir='/dev/shm',
-                              log_dir='.',
-                              ignore_restart=False,
-                              **kwargs):
-    '''
-    Uses ipyparallel to minimize a population of structures.
-
-    :Arguments:
-        *parallel_client (ipyparallel.Client instance)* 
-            The ipyparallel.Client instance to send the jobs to
-
-        *old_prefix (string)*
-            The function will search for files named 
-            *old_prefix_<n>.hms* in the working directory, with *n*
-            in the range 0, ..., *n_struct*
-
-        *new prefix (string)*
-            After minimization, *n_struct* new files 
-            named *new_prefix_<n>.hms* will be written to the
-            working directory
-
-        *n_struct (int)*
-            Number of structures in the population
-
-        *workdir (string)*
-            Set the working directory where the hms files will
-            be found and written.
-
-        *tmp_files_dir (string)*
-            Directory where to store temporary files
-
-        *log_dir (string)*
-            Eventual errors will be dumped to this directory
-
-        *check_violations (bool)*
-            If set to False, skip the violations check
-
-        *ignore_restart (bool)*
-            If set to True, the function will not check the
-            presence of files named *new_prefix_<n>.hms*
-            in the working directory. All the runs will be 
-            re-sent and eventual files already present 
-            will be overwritten.
-
-        *\*\*kwargs*
-            Other keyword arguments to pass to the minimization
-            process. See lammps.generate_input documentation for
-            details
-
-    :Output:
-        *now_completed*
-            Number of completed minimizations in this call
-
-        *n_violated*
-            Number of structures with violations in this call
-
-        Additionally, *now_completed* files 
-        named *new_prefix_<n>.hms*
-        will be written in the *work_dir* directory.
-    
-    :Exceptions:
-        If one or more of the minimizations
-        fails, it will raise a RuntimeError.
-    '''
-
-    # get the logger
-    logger = logging.getLogger()
-
-    try:
-        import json
-
-        # write all parameters to a file on filesystem
-        kwargs['check_violations'] = check_violations
-        kwargs['ignore_restart'] = ignore_restart
-        kwargs['tmp_files_dir'] = tmp_files_dir
-        kwargs['log_dir'] = log_dir
-        parameter_fname = os.path.join(workdir, new_prefix + '.parms.json')
-        with open(parameter_fname, 'w') as fp:
-            json.dump(kwargs, fp)
-    
-        # check if we already have some output files written.
-        completed = []
-        to_minimize = []
-        if ignore_restart:
-            to_minimize = list(range(n_struct))
-            logger.info('bulk_minimize_single_file(): ignoring completed runs.')
-        else:
-            for i in range(n_struct):
-
-                # fname = '{}_{}.hms'.format(new_prefix, i)
-                # fpath = os.path.join(workdir, fname)
-                # if os.path.isfile(fpath):
-                #     completed.append(i)
-                # else:
-                #     to_minimize.append(i)
-
-                fname = 'copy%d.hts' % i
-                fpath = os.path.join(workdir, fname)
-                with HtfFile(fpath, 'r') as f:
-                    if new_prefix not in f:
-                        to_minimize.append(i) 
-
-            if len(to_minimize) == 0:
-                logger.info('bulk_minimize_single_file(): minimization appears to be already finished.')
-                return (0, 0)
-            logger.info('bulk_minimize_single_file(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
-
-        # prepare arguments as a list of tuples (map wants a single argument for each call)
-        pargs = []
-        for i in to_minimize:
-            run_name = '{}_{}'.format(
-                new_prefix,
-                i
-            )
-
-            xin = (
-                os.path.join(workdir, 'copy%d.hts' % i), 
-                old_prefix,
-            )
-
-            xout = (
-                os.path.join(workdir, 'copy%d.hts' % i), 
-                new_prefix,
-            )
-
-            pargs.append((
-                xin,
-                parameter_fname,
-                xout,
-                run_name
-            ))
-
-        # using ipyparallel to map functions to workers
-        engine_ids = list(parallel_client.ids)
-        lbv = parallel_client.load_balanced_view()
-
-        logger.info('bulk_minimize_single_file(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
-        ar = lbv.map_async(_serial_lammps_call, pargs)
-        logger.debug('bulk_minimize_single_file(): map_async sent.')
-
-        # monitor progress
-        monitor_progress('bulk_minimize_single_file() - %s' % new_prefix, ar)
-
-        # post-analysis
-        logger.info('bulk_minimize_single_file(): Done (Total time: %s)' % pretty_tdelta(ar.wall_time))
-        results = list(ar.get())  # returncode, info, n_violations  
-
-        # check for errors
-        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
-        now_completed = [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
-        if len(errors):
-            for i, e in errors:
-                logger.error('Exception returned in minimizing structure %d: %s', i, e)
-                print()
-            raise RuntimeError('Unable to complete bulk_minimize_single_file()')
-        
-        # print a summary
-        n_violated = sum([1 for i, r in now_completed if r[2] > 0 ])
-        logger.info('%d structures with violations over %d structures',
-                     n_violated,
-                     len(now_completed))
-
-        return len(now_completed), n_violated
-    
-    except:
-        logger.error('bulk_minimization() failed', exc_info=True)
-        raise
-
-
-
-def bulk_minimize_single_file_net(parallel_client,
-                                  input_hss,
-                                  input_crd,
-                                  output_crd,
-                                  n_struct,
-                                  workdir='.',
-                                  ignore_restart=False,
-                                  **kwargs):
-    '''
-    Uses ipyparallel to minimize a population of structures.
-
-    :Arguments:
-        *parallel_client (ipyparallel.Client instance)* 
-            The ipyparallel.Client instance to send the jobs to
-
-        *old_prefix (string)*
-            The function will search for files named 
-            *old_prefix_<n>.hms* in the working directory, with *n*
-            in the range 0, ..., *n_struct*
-
-        *new prefix (string)*
-            After minimization, *n_struct* new files 
-            named *new_prefix_<n>.hms* will be written to the
-            working directory
-
-        *n_struct (int)*
-            Number of structures in the population
-
-        *workdir (string)*
-            Set the working directory where the hms files will
-            be found and written.
-
-        *tmp_files_dir (string)*
-            Directory where to store temporary files
-
-        *log_dir (string)*
-            Eventual errors will be dumped to this directory
-
-        *check_violations (bool)*
-            If set to False, skip the violations check
-
-        *ignore_restart (bool)*
-            If set to True, the function will not check the
-            presence of files named *new_prefix_<n>.hms*
-            in the working directory. All the runs will be 
-            re-sent and eventual files already present 
-            will be overwritten.
-
-        *\*\*kwargs*
-            Other keyword arguments to pass to the minimization
-            process. See lammps.generate_input documentation for
-            details
-
-    :Output:
-        *now_completed*
-            Number of completed minimizations in this call
-
-        *n_violated*
-            Number of structures with violations in this call
-
-        Additionally, *now_completed* files 
-        named *new_prefix_<n>.hms*
-        will be written in the *work_dir* directory.
-    
-    :Exceptions:
-        If one or more of the minimizations
-        fails, it will raise a RuntimeError.
-    '''
-
-    # get the logger
-    logger = logging.getLogger()
-
-    try:
-        import json
-
-        # write all parameters to a file on filesystem
-        kwargs['ignore_restart'] = ignore_restart
-        kwargs['workdir'] = os.path.abspath(workdir)
-        parameter_fname = os.path.join(workdir, new_prefix + '.parms.json')
-        with open(parameter_fname, 'w') as fp:
-            json.dump(kwargs, fp)
-    
-        # check if we already have some output files written.
-        completed = []
-        to_minimize = []
-        if ignore_restart:
-            to_minimize = list(range(n_struct))
-            logger.info('bulk_minimize_single_file(): ignoring completed runs.')
-        else:
-            for i in range(n_struct):
-
-                # fname = '{}_{}.hms'.format(new_prefix, i)
-                # fpath = os.path.join(workdir, fname)
-                # if os.path.isfile(fpath):
-                #     completed.append(i)
-                # else:
-                #     to_minimize.append(i)
-
-                fname = 'copy%d.hts' % i
-                fpath = os.path.join(workdir, fname)
-                with HtfFile(fpath, 'r') as f:
-                    if new_prefix not in f:
-                        to_minimize.append(i) 
-
-            if len(to_minimize) == 0:
-                logger.info('bulk_minimize_single_file(): minimization appears to be already finished.')
-                return (0, 0)
-            logger.info('bulk_minimize_single_file(): Found %d already minimized structures. Minimizing %d remaining ones', len(completed), len(to_minimize))
-
-        # prepare arguments as a list of tuples (map wants a single argument for each call)
-        pargs = []
-        for i in to_minimize:
-            run_name = '{}_{}'.format(
-                new_prefix,
-                i
-            )
-
-            xin = (
-                os.path.join(workdir, 'copy%d.hts' % i), 
-                old_prefix,
-            )
-
-            xout = (
-                os.path.join(workdir, 'copy%d.hts' % i), 
-                new_prefix,
-            )
-
-            pargs.append((
-                xin,
-                parameter_fname,
-                xout,
-                run_name
-            ))
-
-        # using ipyparallel to map functions to workers
-        engine_ids = list(parallel_client.ids)
-        lbv = parallel_client.load_balanced_view()
-
-        logger.info('bulk_minimize_single_file(): Starting bulk minimization of %d structures on %d workers', len(to_minimize), len(engine_ids))
-        ar = lbv.map_async(_serial_lammps_call, pargs)
-        logger.debug('bulk_minimize_single_file(): map_async sent.')
-
-        # monitor progress
-        monitor_progress('bulk_minimize_single_file() - %s' % new_prefix, ar)
-
-        # post-analysis
-        logger.info('bulk_minimize_single_file(): Done (Total time: %s)' % pretty_tdelta(ar.wall_time))
-        results = list(ar.get())  # returncode, info, n_violations  
-
-        # check for errors
-        errors = [ (i, r[1]) for i, r in zip(to_minimize, results) if r[0] is None]
-        now_completed = [ (i, r) for i, r in zip(to_minimize, results) if r[0] is not None]
-        if len(errors):
-            for i, e in errors:
-                logger.error('Exception returned in minimizing structure %d: %s', i, e)
-                print()
-            raise RuntimeError('Unable to complete bulk_minimize_single_file()')
-        
-        # print a summary
-        n_violated = sum([1 for i, r in now_completed if r[2] > 0 ])
-        logger.info('%d structures with violations over %d structures',
-                     n_violated,
-                     len(now_completed))
-
-        return len(now_completed), n_violated
-    
-    except:
-        logger.error('bulk_minimization() failed', exc_info=True)
-        raise
