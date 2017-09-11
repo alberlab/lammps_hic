@@ -35,6 +35,8 @@ __version__ = "0.0.1"
 __email__   = "polles@usc.edu"
 
 
+CHUNK_SIZE = 200000
+
 def _compute_actdist(data):
     local_i, local_j, radii, to_process, nstruct = data
 
@@ -217,19 +219,28 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     end = time.time()
     logger.debug('get_actdist(): timing for data distribution: %f', end-start)
     
-    # actually send the jobs
-    engine_ids = list(parallel_client.ids)
-    dview = parallel_client[:]
-    dview.use_cloudpickle()
-    lbview = parallel_client.load_balanced_view(engine_ids)
-    async_results = lbview.map_async(_compute_actdist, args)
-    monitor_progress('get_actdists()', async_results)
-        
-    # merge results
     results = []
-    for r in async_results.get():
-        results += r
+    
+
+    # actually send the jobs
+    logger.debug('get_actdist(): number of pairs to process: %d', len(args))
+    
         
+    proc_chunk = 0
+    while proc_chunk*CHUNK_SIZE < len(args):
+        tp = args[proc_chunk:proc_chunk+1]
+        logger.debug('get_actdist(): running chunk %d of %d: %d pairs', proc_chunk + 1, len(args)/CHUNK_SIZE + 1,  len(tp))
+        dview = parallel_client[:]
+        dview.use_cloudpickle()
+        engine_ids = list(parallel_client.ids)
+        lbview = parallel_client.load_balanced_view(engine_ids)
+        async_results = lbview.map_async(_compute_actdist, tp)
+        monitor_progress('get_actdists()', async_results)
+        for r in async_results.get():
+            # merge results
+            results += r
+        proc_chunk += 1
+            
     if save_to is not None:
         np.savetxt(save_to,
                    results,
