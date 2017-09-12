@@ -35,7 +35,7 @@ class SqliteServer(object):
             self.host = host
             self.port = port
             self._serversocket = None
-            self._th = threading.Thread(target=self.run)
+            self._listen_thread = threading.Thread(target=self.run)
             config = {
                 'ip' : self.myip,
                 'port' : self.port
@@ -57,13 +57,13 @@ class SqliteServer(object):
         self._serversocket.send(pickle.dumps(obj))
 
     def start(self):
-        self._th.start()
+        self._listen_thread.start()
 
     def run(self):
-        self._db = sqlite3.connect(self.dbfname)
+        self._db = sqlite3.connect(self.dbfname, isolation_level=None)
         if self.status != self.READY:
             raise RuntimeError('_DB setup failed')
-        self._context = zmq._Context()
+        self._context = zmq.Context()
         self._serversocket = self._context.socket(zmq.REP)
         cur = self._db.cursor()
         try:
@@ -103,22 +103,26 @@ class SqliteServer(object):
                     if not self._serversocket.closed:
                         self.send([-1, infostr])
         finally:
+            self._db.commit()
             self._db.close()
             self._serversocket.setsockopt( zmq.LINGER, 0 )
             self._serversocket.close()
             self._context.term()
 
+        print 'finishing listening thread for %s', self.dbfname
+        sys.stdout.flush()
+
     def close(self):
-        tmpcontext = zmq._Context()
+        tmpcontext = zmq.Context()
         socket = tmpcontext.socket(zmq.REQ)
         try:
             addr = 'tcp://' + self.myip + ':' + str(self.port)
             socket.connect(addr)
-            socket.send(pickle.dumps('q'))
+            socket.send(pickle.dumps(['q', '', (),]))
             msg = pickle.loads(socket.recv())
             if msg[0] != 0:
-                raise RuntimeError('Error on closing instance')
-            self._th.join()
+                raise RuntimeError('Error on closing instance:', msg[1])
+            self._listen_thread.join()
         finally:
             socket.setsockopt( zmq.LINGER, 0 )
             socket.close()
@@ -129,7 +133,7 @@ class SqliteServer(object):
         return self
 
     def __exit__(self, type, value, traceback):
-        if self._th.is_alive():
+        if self._listen_thread.is_alive():
             self.close()
 
 class SqliteClient(object):
@@ -149,13 +153,13 @@ class SqliteClient(object):
                     raise
                 time.sleep(1)
 
-        self._context = zmq._Context()
-        self.socket = self._context.socket(zmq.REQ)
+        self._context = zmq.Context()
+        self._socket = self._context.socket(zmq.REQ)
         addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
-        self.socket.connect(addr)
+        self._socket.connect(addr)
 
     def recv(self):
-        data = pickle.loads(self.socket.recv())
+        data = pickle.loads(self._socket.recv())
         if data[0] != 0:
             raise RuntimeError('Request Error, server returned: %s' % data)
         if len(data) >= 2: # some get request
@@ -163,7 +167,7 @@ class SqliteClient(object):
         return True
 
     def send(self, obj):
-        self.socket.send(pickle.dumps(obj))
+        self._socket.send(pickle.dumps(obj))
 
     def fetchall(self, query, args=tuple()):
         self.send([
@@ -187,6 +191,7 @@ class SqliteClient(object):
             query,
             args,
         ])
+        print 'executing', query, args
         return self.recv()
 
     def executemany(self, query, args=[tuple()]):
@@ -205,10 +210,15 @@ class SqliteClient(object):
         ])
         return self.recv()
 
+    def close(self):
+        self._socket.setsockopt( zmq.LINGER, 0 )
+        self._socket.close()
+        self._context.term()
+
     def __enter__(self):
         return self
 
     def __exit__(self, type, value, traceback):
-        self.socket.setsockopt( zmq.LINGER, 0 )
-        self.socket.close()
+        self._socket.setsockopt( zmq.LINGER, 0 )
+        self._socket.close()
         self._context.term()

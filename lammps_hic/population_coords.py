@@ -1,4 +1,5 @@
 import numpy as np
+import os.path
 
 def parseSize(size):
     units = {"b": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
@@ -55,6 +56,9 @@ class PopulationCrdFile(object):
         self.dtype = np.dtype(dtype)
         self.itemsize = self.dtype.itemsize
         self.datasize = self.dtype.itemsize * np.prod(shape)
+
+        if mode == 'r+' and not os.path.isfile(fname):
+            mode = 'w'
         
         self.fd = open(fname, mode + 'b')
         if (mode == 'w'):
@@ -67,7 +71,7 @@ class PopulationCrdFile(object):
             self._write_header()
         else:
             ndim = np.fromfile(self.fd, dtype=np.int32, count=1)
-            assert ndim == 3
+            assert ndim == 3, 'file %s fname has dimension %d != 3' % (fname, ndim)
             self.shape = np.fromfile(self.fd, dtype=np.int32, count=3)
             self.headersize = 4 + 4*(3)
 

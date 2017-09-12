@@ -1,13 +1,31 @@
 import numpy as np
 from numpy.linalg import norm
+import os.path
 
 from ..actdist import _get_copy_index
+from ..lammps_utils import Bond, HarmonicLowerBound
 
-MAX_BONDS = 20
 
-def apply_damid_restraints(system, crd, radii, index, damid_actdists, user_args):
+def read_damid(damid):
+    assert(damid is not None)
+    if isinstance(damid, str) or isinstance(damid, unicode):
+        if os.path.getsize(damid) > 0:
+            damid_actdists = np.genfromtxt(damid,
+                                           usecols=(0, 1, 2),
+                                           dtype=(int, float, float))
+            if damid_actdists.shape == ():
+                damid_actdists = [damid_actdists]
+        else:
+            damid_actdists = []
+    return damid_actdists
 
+
+def apply_damid_restraints(model, crd, radii, index, user_args):
+    
+    damid_actdists = read_damid(user_args['damid'])
     copy_index = _get_copy_index(index)
+    ck = user_args['damid_kspring']
+    
     for item in damid_actdists:
         i = item[0]
         ii = copy_index[i]
@@ -21,20 +39,10 @@ def apply_damid_restraints(system, crd, radii, index, damid_actdists, user_args)
         for k in ii:
             cd[k] = user_args['nucleus_radius'] - norm(crd[k])
 
-        parms = None
-
         for k in range(len(ii)):
             if cd[k] > d:
                 continue
-
-            if parms is None:
-                parms = {
-                    'style' : BS.HARMONIC_LOWER_BOUND,
-                    'k' : user_args['damid_kspring'],
-                    'r' : td,
-                }
-
-            dummy = system.get_next_dummy()
-
-            system.bonds.add_bond(system.atoms[ii[k]], dummy, parms, BT.DAMID)
+            center = model.get_next_dummy()
+            bt = HarmonicLowerBound(k=ck, r0=td)
+            model.add_bond(i, center, bt, restraint_type=Bond.DAMID)
             

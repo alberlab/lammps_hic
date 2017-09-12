@@ -31,8 +31,8 @@ import h5py
 import logging
 import os
 import os.path
-from alabtools.utils import Index, Genome, HssFile, COORD_DTYPE, RADII_DTYPE
 
+from alabtools.utils import Index, COORD_DTYPE, RADII_DTYPE
 
 ACTDIST_TXT_FMT = '%6d %6d %.5f %10.2f %.5f %.5f'
 violations_dtype = np.dtype([('i', 'i4'),

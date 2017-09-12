@@ -9,7 +9,8 @@ float_epsilon = 1e-2
 async_check_timeout = 60
 
 #format for logger
+import logging
 log_fmt = '%(asctime)s %(levelname)s:%(message)s'
-
+default_log_formatter = logging.Formatter(log_fmt)
 
 

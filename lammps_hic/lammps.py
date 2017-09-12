@@ -35,24 +35,19 @@ import os.path
 import math
 import logging
 import numpy as np
-from numpy.linalg import norm
+import time
 from io import StringIO
-from myio import Violations
 from itertools import groupby
 
 
 from subprocess import Popen, PIPE
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
 
-
-from .myio import read_hss, write_hss, HtfFile
-from .util import monitor_progress, pretty_tdelta, require_vars, resolve_templates, remove_if_exists
-from .globals import lammps_executable, float_epsilon
+from .util import require_vars, resolve_templates
+from .globals import lammps_executable
 from .restraints import *
 from .lammps_utils import *
+from .network_coord_io import CoordServer
+from .network_sqlite import SqliteClient, SqliteServer
 from .parallel_controller import ParallelController
 
 __author__  = "Guido Polles"
@@ -213,10 +208,9 @@ def create_lammps_script(model, user_args):
         groupedlist = {k: list(v) for k, v in groupby(sortedlist, 
                                                 key=lambda x: x.atom_category)}
 
-
         bead_types = [str(x) for x in groupedlist[AtomType.BEAD]]
-        dummy_types = [str(x) for x in groupedlist[AtomType.FIXED_DUMMY]]
-        centroid_types = [str(x) for x in groupedlist[AtomType.CLUSTER_CENTROID]]
+        dummy_types = [str(x) for x in groupedlist.get(AtomType.FIXED_DUMMY, [])]
+        centroid_types = [str(x) for x in groupedlist.get(AtomType.CLUSTER_CENTROID, [])]
         print('group beads type', ' '.join(bead_types), file=f)
 
         if dummy_types:
@@ -588,7 +582,7 @@ def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm',
         info = get_info_from_log(StringIO(unicode(output)))
         info['n_restr'] = len(system.bonds)
         info['n_hic_restr'] = len([1 for b in system.bonds 
-                                   if b.restraint_type == BT.HIC])
+                                   if b.restraint_type == Bond.HIC])
         
         with open(traj_fname, 'r') as fd:
             new_crd = get_last_frame(fd)
@@ -613,18 +607,21 @@ def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm',
         raise
 
     if check_violations:
-        violations = _check_violations(system, new_crd, i)
+        violations = _check_violations(system, new_crd, kwargs['i'])
     else: 
         violations = []
     return new_crd, info, violations
 
     
-def _setup_and_run_task(i):
+def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
+                        str_templates, status_db, check_violations, 
+                        violations_db):
     '''
     Serial function to be mapped in parallel. //
     It is a wrapper intended to be used only internally by the parallel map
-    function.
-    Checks global variables, resolve the templates, obtains input data,
+    function. Will be called as a partial with all the constant variables
+    set, except i.
+    Resolve the templates, obtains input data,
     runs the minimization routines and finally communicates back results.
 
     Parameters
@@ -639,13 +636,6 @@ def _setup_and_run_task(i):
     from alabtools.utils import HssFile
     from .network_sqlite import SqliteClient
     
-    # check that all the necessary varaibles have been set
-    require_vars(['lammps_args', 'input_crd', 'output_crd', 'input_hss',
-                  'str_templates', 'status_db', 
-                  'check_violations', 'violations_db'])
-
-    require_vars(['run_name'], str_templates)
-
     tmp_vars = resolve_templates(str_templates, [i])
     run_name = tmp_vars['run_name']
 
@@ -656,6 +646,7 @@ def _setup_and_run_task(i):
     with HssFile(input_hss, 'r') as f:
         radii = f.radii
         index = f.index
+        n_beads = len(radii)
 
     # connects to the coordinates server
     with CoordClient(input_crd) as f:
@@ -672,7 +663,7 @@ def _setup_and_run_task(i):
     
     # outputs coordinates
     with CoordClient(output_crd) as f:
-        f.set_struct(i, new_crd)
+        f.set_struct(i, new_crd[:n_beads])
 
     if check_violations and violations:
         violations_cl.executemany('INSERT INTO violations VALUES ' +
@@ -681,8 +672,10 @@ def _setup_and_run_task(i):
     # set as complete 
     status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?, ?)', 
                    (i, int(time.time()), info['final-energy'],
-                    info['pair-energy']), info['bond-energy'],
-                    info['md-time'])
+                    info['pair-energy'], info['bond-energy'],
+                    info['md-time']))
+
+    return 0
 
 def minimize_population(run_name, input_hss, input_crd, output_crd,
                         n_struct, workdir='.', tmp_files_dir='/dev/shm',
@@ -758,7 +751,7 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
     status_db = run_name + '.status.db'
     violations_db = run_name + '.violations.db'
     str_templates = {
-        'run_name' = run_name + '-{0:0#d}'.replace('#',str(ndigit))
+        'run_name' : run_name + '-{0:0#d}'.replace('#',str(ndigit))
     }
 
     pc = ParallelController(name=run_name, 
@@ -766,14 +759,14 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
                             serial_fun=_setup_and_run_task)
 
     # set the variables on the workers
-    pc.set_global('lammps_args', lammps_args)
-    pc.set_global('input_crd', input_crd)
-    pc.set_global('output_crd', output_crd)
-    pc.set_global('input_hss', input_hss)
-    pc.set_global('str_templates', str_templates)
-    pc.set_global('status_db', status_db)
-    pc.set_global('violations_db', violations_db)
-    pc.set_global('check_violations', check_violations)
+    pc.set_const('lammps_args', lammps_args)
+    pc.set_const('input_crd', input_crd)
+    pc.set_const('output_crd', output_crd)
+    pc.set_const('input_hss', input_hss)
+    pc.set_const('str_templates', str_templates)
+    pc.set_const('status_db', status_db)
+    pc.set_const('violations_db', violations_db)
+    pc.set_const('check_violations', check_violations)
 
     # prepare i/o servers
     violations_setup = ('CREATE TABLE violations (struct INT, '
@@ -782,34 +775,31 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
         'timestamp INT, efinal REAL, epair REAL, ebond REAL, '
         'mdtime REAL)')
 
-    incrd_srv = CoordServer(input_crd, mode='r', max_memory=max_memory)
-
     if ignore_restart:
         logger.info('Ignoring completed runs.')
         openmode = 'w'
     else:
         openmode = 'r+'
-    
-    outcrd_srv = CoordServer(output_crd, mode=openmode, shape=incrd_srv.shape, 
-                             max_memory=max_memory)
-    violations_srv = SqliteServer(violations_db, violations_setup, mode=openmode)
-    status_srv = SqliteServer(status_db, status_setup, mode=openmode)
 
-    incrd_srv.start()
-    outcrd_srv.start()
-    violations_srv.start()
-    status_srv.start()
-    
-    # check if we have already completed tasks
-    with SqliteClient(status_db) as clt:
-        completed = clt.fetchall('SELECT struct from completed')
-    to_process = [x for x in range(n_struct) if x not in completed]
-    logger.info('%d jobs completed, %d jobs to be submitted.', 
-                len(completed), len(to_process))
+    with CoordServer(input_crd, mode='r', 
+                     max_memory=max_memory, port=29773) as incrd_srv, \
+         CoordServer(output_crd, mode=openmode, shape=incrd_srv.shape, 
+                     max_memory=max_memory, port=29783), \
+         SqliteServer(violations_db, violations_setup, 
+                      mode=openmode, port=28773), \
+         SqliteServer(status_db, status_setup, 
+                      mode=openmode, port=28783):
 
-    # map the jobs to the workers
-    pc.args = to_process
-    pc.submit()
+        # check if we have already completed tasks
+        with SqliteClient(status_db) as clt:
+            completed = clt.fetchall('SELECT struct from completed')
+        to_process = [x for x in range(n_struct) if x not in completed]
+        logger.info('%d jobs completed, %d jobs to be submitted.', 
+                    len(completed), len(to_process))
+
+        # map the jobs to the workers
+        pc.args = to_process
+        pc.submit()
 
     logger.info('Run %s completed', run_name)
 

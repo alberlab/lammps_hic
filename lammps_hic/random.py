@@ -33,7 +33,8 @@ from math import acos, sin, cos, pi
 
 from .myio import write_hms
 from .util import monitor_progress, pretty_tdelta
-from .network_coord_io import CoordServer, CoordClient
+from .network_coord_io import CoordServer
+from .population_coords import PopulationCrdFile
 
 
 __author__  = "Guido Polles"
@@ -136,8 +137,7 @@ def _write_random_to_server(fname, index, i, R=5000.0):
         client.set_struct(i, crd)
 
 
-from .myio import PopulationCrdFile
-from .network_coord_io import CoordServer, CoordClient
+
 def create_random_population_with_territories(path, index, n_struct, ipp_client=None):
     '''
     Creates a population of N = *n_struct* structures, each on a single hms file. 

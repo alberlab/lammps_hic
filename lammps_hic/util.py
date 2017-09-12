@@ -1,5 +1,5 @@
 import logging
-import path
+import os.path
 from .globals import async_check_timeout
 
 
@@ -65,7 +65,7 @@ def require_vars(names, namespace=None):
         namespace = globals()
     for n in names:
         if n not in namespace:
-            raise RuntimeError('Missing %s from global variables')
+            raise RuntimeError('Missing %s from global variables' % n)
 
 def resolve_templates(templates, args):
     rt = {}

@@ -6,7 +6,7 @@ import threading
 import traceback
 import sys
 import zmq
-
+from functools import partial
 from .globals import default_log_formatter
 
 def pretty_tdelta(seconds):
@@ -20,11 +20,8 @@ def pretty_tdelta(seconds):
         
 
 class FunctionWrapper(object):
-    def __init__(self, inner, global_vars):
-        self.inner = inner
-        self.glb = global_vars
-        for k, v in self.glb.items():
-            self.inner.__globals__[k] = v
+    def __init__(self, inner, const_vars):
+        self.inner = partial(inner, **const_vars)
 
     def __call__(self, *args, **kwargs):
         try:
@@ -53,15 +50,16 @@ class ParallelController(object):
                  name='ParallelController',
                  serial_fun=None,
                  args=[],
-                 global_vars={}, 
+                 const_vars={}, 
                  chunksize=1,
                  logfile=None, 
                  loglevel=logging.DEBUG,
-                 poll_interval=60):
+                 poll_interval=60,
+                 max_batch=None):
         self.name = name
         self._serial_fun = serial_fun # serial function to be mapped
         self._args = args # arguments to be mapped
-        self.global_vars = global_vars # globals for the function
+        self.const_vars = const_vars # consts for the function
         self.chunksize = chunksize
         self.logfile = logfile
         self.loglevel = loglevel
@@ -76,6 +74,7 @@ class ParallelController(object):
         self._logger = None # logger
         self._ar = None # async results
         self._fwrapper = None # function wrapper
+        self._max_batch = max_batch
 
     def get_status(self):
         return self._status
@@ -86,8 +85,8 @@ class ParallelController(object):
     def get_function(self):
         return self._serial_fun
 
-    def set_global(self, name, val):
-        self.global_vars[name] = val
+    def set_const(self, name, val):
+        self.const_vars[name] = val
 
     def set_args(self, args):
         self._args = args
@@ -110,20 +109,20 @@ class ParallelController(object):
             self._logger.addHandler(fh)
         self._logger.setLevel(self.loglevel)
         
+        # prepare the remote function
+        self._fwrapper = FunctionWrapper(self._serial_fun, self.const_vars)
 
+    def _setup_ipp(self):
         # get client and view instances, and use cloudpickle
-        self._client = ipyparallel.Client(context=zmq.context())
+        self._client = ipyparallel.Client(context=zmq.Context())
         self._ids = self._client.ids
         self._dview = self._client[self._ids]
         #self._dview.use_cloudpickle()
         self._view = self._client.load_balanced_view(targets=self._ids)
         
-        # prepare the remote function
-        self._fwrapper = FunctionWrapper(self._serial_fun, self.global_vars)
-        
-        
     def _cleanup(self):
-        self._client.close()
+        if self._client:
+            self._client.close()
 
     def _handle_errors(self):
         failed = [i for i, x in enumerate(self._status) 
@@ -143,34 +142,55 @@ class ParallelController(object):
                   file=sys.stderr)
             print('-'*40, file=sys.stderr)
             
+    def _split_batches(self):
+        if self._max_batch is None:
+            return [(0, len(self.args))]
+        else:
+            return [(b*self._max_batch, 
+                     min(len(self.args), (b+1)*self._max_batch)) 
+                    for b in range(len(self.args)//self._max_batch + 1)]
+
     def _run(self):
         got_errors = False
-        
-        self._setup()
-        # maps asyncronously on workers
-        self._ar = self._view.map_async(self._fwrapper, self._args, 
-                                        chunksize=self.chunksize)
-        
-        # start a thread to monitor progress
-        monitor_thread = threading.Thread(target=self._monitor)
-        monitor_thread.start()
-
         self.results = [None] * len(self._args)
         self._status = [ParallelController.RUNNING] * len(self._args)
+        
+        self._setup()
+        job_batches = self._split_batches()
 
-        # collect results
-        for i, result in enumerate(self._ar):
-            self.results[i] = result
-            if result[0] == -1:
-                got_errors = True
-                self._status[i] = ParallelController.FAILED
-            else:
-                self._status[i] = ParallelController.SUCCESS
+        for batch_no, (batch_start, batch_end) in enumerate(job_batches):
+            self._logger.info('Starting batch %d of %d: %d tasks', 
+                              batch_no, len(job_batches), 
+                              batch_end - batch_start)
+            self._setup_ipp()
 
-        # close the monitor thread and print details
-        monitor_thread.join()
-        self._logger.info('Done. Time elapsed: %s', 
-                          pretty_tdelta(self._ar.elapsed))
+            # maps asyncronously on workers
+            self._ar = self._view.map_async(self._fwrapper, 
+                                            self._args[batch_start:batch_end], 
+                                            chunksize=self.chunksize)
+        
+            # start a thread to monitor progress
+            self._monitor_flag = True
+            monitor_thread = threading.Thread(target=self._monitor)
+            monitor_thread.start()
+
+            try:
+                # collect results
+                for i, result in enumerate(self._ar):
+                    self.results[i + batch_start] = result
+                    if result[0] == -1:
+                        got_errors = True
+                        self._status[i + batch_start] = ParallelController.FAILED
+                    else:
+                        self._status[i + batch_start] = ParallelController.SUCCESS
+
+            except:
+                self._monitor_flag = False
+                raise
+            # close the monitor thread and print details
+            monitor_thread.join()
+            self._logger.info('Done. Time elapsed: %s', 
+                              pretty_tdelta(self._ar.elapsed))
         
         # handle errors if any occurred
         if got_errors:
@@ -180,7 +200,7 @@ class ParallelController(object):
             self._ok = True
 
     def _monitor(self):
-        while not self._ar.ready():
+        while not self._ar.ready() and self._monitor_flag:
             n_tasks = len(self._ar)
             if self._ar.progress > 0:
                 time_per_task = float(self._ar.elapsed) / self._ar.progress
@@ -193,7 +213,12 @@ class ParallelController(object):
                         n_tasks,
                         pretty_tdelta(self._ar.elapsed),
                         etastr)
-            self._ar.wait(self.poll_interval)
+            elapsed = 0
+            while elapsed < self.poll_interval:
+                if not self._monitor_flag:
+                    break
+                self._ar.wait(1)
+                elapsed += 1
 
     def submit(self):
         if not self._serial_fun:
@@ -203,8 +228,6 @@ class ParallelController(object):
         try:
             self._setup()
             self._run()
-        except Exception as e:
-            raise e
         finally:
             self._cleanup()
 

@@ -132,17 +132,17 @@ class Bond(object):
     def __eq__(self, other): 
         return self.__dict__ == other.__dict__
 
+    def length(self, crds):
+        return np.linalg.norm(crds[self.i.id] - crds[self.j.id])
+
     def get_violation(self, crds):
-        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
-        return self.bond_type.get_violation(bond_length)
+        return self.bond_type.get_violation(self.length(crds))
 
     def get_relative_violation(self, crds):
-        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
-        return self.bond_type.get_relative_violation(bond_length)
+        return self.bond_type.get_relative_violation(self.length(crds))
 
     def get_energy(self, crds):
-        bond_length = np.linalg.norm(crds[self.i] - crds[self.j])
-        return self.bond_type.get_energy(bond_length)
+        return self.bond_type.get_energy(self.length(crds))
 
 class AtomType(object):
     '''
