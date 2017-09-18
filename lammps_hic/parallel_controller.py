@@ -100,8 +100,8 @@ class ParallelController(object):
         # setup logger
         self._logger = logging.getLogger(self.name)
         # keep only stream handlers
-        self._logger.handlers = [h for h in self._logger.handlers 
-                                 if isinstance(h, logging.StreamHandler)] 
+        for handler in self._logger.handlers:
+            self._logger.removeHandler(handler)
         
         if self.logfile is not None:
             fh = logging.FileHandler(self.logfile)

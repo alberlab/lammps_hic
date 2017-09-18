@@ -216,6 +216,7 @@ class PopulationCrdFile(object):
 
     def close(self):
         try:
+            self.flush()
             self.fd.close()
         except:
             pass

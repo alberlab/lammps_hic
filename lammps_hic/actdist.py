@@ -24,9 +24,11 @@ from numpy.lib.format import open_memmap
 import time
 import h5py
 import gzip
-from bisect import bisect
+import scipy.io
 from itertools import islice
-
+from .population_coords import PopulationCrdFile
+from .parallel_controller import ParallelController
+from .network_sqlite import SqliteClient, SqliteServer
 from alabtools.utils import HssFile
 
 
@@ -34,7 +36,7 @@ from alabtools.utils import HssFile
 
 __author__  = "Guido Polles"
 __license__ = "GPL"
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 __email__   = "polles@usc.edu"
 
 # specifies the size (in bytes) for chunking the process
@@ -80,7 +82,17 @@ def _load_memmap(name, path, mode='r+', shape=None, dtype='float32'):
     from numpy.lib.format import open_memmap
     globals()[name] = open_memmap(path, mode=mode, shape=shape, dtype=dtype)
 
-def _compute_actdist(i, j, pwish, plast):
+def existingPortion(v, rsum):
+        return sum(v<=rsum)*1.0/len(v)
+
+def cleanProbability(pij, pexist):
+    if pexist < 1:
+        pclean = (pij - pexist) / (1.0 - pexist)
+    else:
+        pclean = pij
+    return max(0, pclean)
+
+def _compute_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
     '''
     Serial function to compute the activation distances for a pair of loci 
     It expects some variables to be defined in its scope:
@@ -103,25 +115,9 @@ def _compute_actdist(i, j, pwish, plast):
             - ad (float): the activation distance
             - p: the refined probability
     '''
-
-    global coordinates
-    global radii
-    global copy_index
-
-    def existingPortion(v, rsum):
-        return sum(v<=rsum)*1.0/len(v)
-
-    def cleanProbability(pij, pexist):
-        if pexist < 1:
-            pclean = (pij - pexist) / (1.0 - pexist)
-        else:
-            pclean = pij
-        return max(0, pclean)
-        
-
     import numpy as np
     
-    n_struct = coordinates.shape[0]
+    n_struct = coordinates.nstruct
     ii = copy_index[i]
     jj = copy_index[j]
 
@@ -134,8 +130,8 @@ def _compute_actdist(i, j, pwish, plast):
     it = 0  
     for k in ii:
         for m in jj:
-            x = coordinates[:, k, :]
-            y = coordinates[:, m, :] 
+            x = coordinates.get_bead(k)
+            y = coordinates.get_bead(m) 
             d_sq[it] = np.sum(np.square(x - y), axis=1)
             it += 1
     
@@ -162,7 +158,7 @@ def _compute_actdist(i, j, pwish, plast):
     
     contact_count = np.count_nonzero(d_sq[0:n_possible_contacts, :] <= rcutsq)
     pnow = float(contact_count) / (n_possible_contacts * n_struct)
-    sortdist_sq = np.sort(d_sq[0:n_possible_contacts, :])
+    sortdist_sq = np.sort(d_sq[0:n_possible_contacts, :].ravel())
 
     t = cleanProbability(pnow, plast)
     p = cleanProbability(pwish, t)
@@ -306,3 +302,99 @@ def get_actdists(parallel_client, hss_fname, matrix_memmap, crd_memmap,
         logger.debug('get_actdist(): timing for round %d (%d items): %f', round_num,
                      n_used, end-start)
 
+def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
+    status = SqliteClient(status_db)
+
+    batch_id, params = argtuple
+
+    with HssFile(input_hss) as hss:
+        radii = hss.get_radii()
+        index = hss.get_index()
+
+    copy_index = _get_copy_index(index)
+
+    results = []
+    with PopulationCrdFile(input_crd, 'r', max_memory=max_memory) as crd:
+        for i, j, pwish, plast in params:
+            r = _compute_actdist(i, j, pwish, plast, crd, radii, copy_index)
+            if r is not None:
+                results.append(r)
+
+    status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?)', 
+                   (batch_id, int(time.time()), len(params), len(results), 
+                    '\n'.join()))
+
+    return results
+
+def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
+                                 sigma, last_ad=[], log=None, 
+                                 args_batch_size=100, task_batch_size=2000, 
+                                 ignore_restart=False, max_memory='2GB'):
+
+    logger = logging.getLogger('HiC-Actdist')
+    logger.setLevel(logging.DEBUG)
+
+    # read input map
+    probability_matrix = scipy.io.mmread(input_matrix)
+    mask = probability_matrix.data >= sigma
+    ii = probability_matrix.row[mask]
+    jj = probability_matrix.col[mask]
+    pwish = probability_matrix.data[mask]
+
+    # get last probabilities 
+    last_prob = {(i, j): p for i, j, _, _, p, _ in last_ad}
+
+    # generate arguments
+    n_args_batches = len(ii) // args_batch_size
+    parallel_args = []
+    if len(ii) % args_batch_size != 0:
+        n_args_batches += 1
+    for b in range(n_args_batches):
+        start = b * args_batch_size
+        end = min((b+1) * args_batch_size, len(ii))
+        params = [(ii[k], jj[k], pwish[k], last_prob.get((ii[k], jj[k]), 0.))
+                for k in range(start, end)]
+        arg = (b, params)
+        parallel_args.append(arg)   
+
+    # Decide file names
+    status_db = run_name + '.status.db'
+
+    pc = ParallelController(name=run_name, 
+                            logfile=log, 
+                            serial_fun=_setup_and_run_task,
+                            max_batch=task_batch_size)
+
+    # set the variables on the workers
+    pc.set_const('input_hss', input_hss)
+    pc.set_const('input_crd', input_crd)
+    pc.set_const('status_db', status_db)
+    pc.set_const('max_memory', max_memory)
+    
+    # prepare i/o servers
+    status_setup = ('CREATE TABLE completed (batch INT, timestamp INT, batchsize INT, resultsize INT)')
+
+    if ignore_restart:
+        logger.info('Ignoring completed runs.')
+        openmode = 'w'
+    else:
+        openmode = 'r+'
+
+    with SqliteServer(status_db, status_setup, 
+                      mode=openmode, port=48112):
+
+        # check if we have already completed tasks
+        with SqliteClient(status_db) as clt:
+            completed = clt.fetchall('SELECT batch from completed')
+        to_process = [parallel_args[x] for x in range(n_args_batches) if x not in completed]
+        logger.info('%d jobs completed, %d jobs to be submitted.', 
+                    len(completed), len(to_process))
+
+        # map the jobs to the workers
+        pc.args = to_process
+        pc.submit()
+
+    if pc.success():
+
+
+    logger.info('Run %s completed', run_name)

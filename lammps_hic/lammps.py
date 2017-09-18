@@ -628,6 +628,26 @@ def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
     ---------- 
     i : int
         number of the structure 
+    lammps_args : dict
+        parameters to be passed to the lammps minimization routine
+    input_crd : str
+        input binary coordinate file
+    output_crd : str
+        output binary coordinate file
+    input_hss : str
+        an input hss with the index and genome data
+    str_templates : dict
+        dictionary of string key/value pairs of task-dependent parameters
+    status_db : str
+        path of sqlite3 database file for the status of the parallel run
+    violations_db : str 
+        path of sqlite3 database file saving the violations
+    check_violations : bool
+        whether to check violations or not
+
+    Returns
+    -------
+    None
     
     '''
 
@@ -675,72 +695,52 @@ def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
                     info['pair-energy'], info['bond-energy'],
                     info['md-time']))
 
-    return 0
 
 def minimize_population(run_name, input_hss, input_crd, output_crd,
                         n_struct, workdir='.', tmp_files_dir='/dev/shm',
                         ignore_restart=False, log=None, lammps_args={},
                         check_violations=False, max_memory='2GB'):
     '''
-    Uses ipyparallel to minimize a population of structures.
-
     Parameters
-    ----------
-        *parallel_client (ipyparallel.Client instance)* 
-            The ipyparallel.Client instance on which
+    ---------- 
+    run_name : str
+        Name of the run 
+    input_hss : str
+        an input hss with the index and genome data
+    input_crd : str
+        input binary coordinate file
+    output_crd : str
+        output binary coordinate file
+    n_struct : int
+        number of structures to process
+    workdir : str
+        path of the working directory
+    tmp_files_dir : str
+        path where to temporary store working files
+    ignore_restart : bool
+        do not check for previous generated files, and rerun
+    log : str (optional)
+        path of a log file
+    lammps_args : dict
+        parameters to be passed to the lammps minimization routine
+    check_violations : bool
+        whether to check violations or not
+    max_memory : str or int
+        memory limit for each coordinates files I/O. Note that there are at
+        least two coordinates files, and many more variables / processes, 
+        so the limit should be reasonably smaller than the max memory.
+        Defaults to '2GB' 
 
-        *old_prefix (string)*
-            The function will search for files named 
-            *old_prefix_<n>.hms* in the working directory, with *n*
-            in the range 0, ..., *n_struct*
+    Returns
+    -------
+    None
 
-        *new prefix (string)*
-            After minimization, *n_struct* new files 
-            named *new_prefix_<n>.hms* will be written to the
-            working directory
+    Raise
+    -----
+    RuntimeException
+        if one or more of the minimization fails, ParallelController will
+        raise a RuntimeException
 
-        *n_struct (int)*
-            Number of structures in the population
-
-        *workdir (string)*
-            Set the working directory where the hms files will
-            be found and written.
-
-        *tmp_files_dir (string)*
-            Directory where to store temporary files
-
-        *log_dir (string)*
-            Eventual errors will be dumped to this directory
-
-        *check_violations (bool)*
-            If set to False, skip the violations check
-
-        *ignore_restart (bool)*
-            If set to True, the function will not check the
-            presence of files named *new_prefix_<n>.hms*
-            in the working directory. All the runs will be 
-            re-sent and eventual files already present 
-            will be overwritten.
-
-        *\*\*kwargs*
-            Other keyword arguments to pass to the minimization
-            process. See lammps.generate_input documentation for
-            details
-
-    :Output:
-        *now_completed*
-            Number of completed minimizations in this call
-
-        *n_violated*
-            Number of structures with violations in this call
-
-        Additionally, *now_completed* files 
-        named *new_prefix_<n>.hms*
-        will be written in the *work_dir* directory.
-    
-    :Exceptions:
-        If one or more of the minimizations
-        fails, it will raise a RuntimeError.
     '''
 
     logger = logging.getLogger('minimize_population()')
