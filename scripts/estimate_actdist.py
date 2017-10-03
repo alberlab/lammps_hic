@@ -10,7 +10,7 @@ if __name__ == '__main__':
     required_args = parser.add_argument_group('required arguments')
     required_args.add_argument('-n', '--name', help='ID of the run', 
                                required=True)
-    required_args.add_argument('-h', '--hss', help='hss file containing the index for the system', 
+    required_args.add_argument('-H', '--hss', help='hss file containing the index for the system', 
                                required=True)
     required_args.add_argument('-c', '--crd', help='binary population coordinates file', 
                                required=True)
@@ -23,7 +23,7 @@ if __name__ == '__main__':
                                type=float, required=True)
 
     opt_args = parser.add_argument_group('optional arguments')
-    opt_args.add_argument('-l', '--last', help='previous iteration actdist file. Set None',
+    opt_args.add_argument('--last', help='previous iteration actdist file. Set None',
                           type=str, default=None)
     opt_args.add_argument('--log', help='log to this file - defaults to the <run_ID>.log',
                           type=str)
@@ -44,7 +44,7 @@ if __name__ == '__main__':
     else:
         last = read_actdist_file(args.last)
 
-    compute_activation_distances(args.name, args.hss, args.hss, args.crd, 
+    compute_activation_distances(args.name, args.hss,args.crd, 
                                  args.pmat, args.sigma, args.out, last, 
                                  args.log, args.serial_batch_size, 
                                  args.parallel_batch_size, args.ignore_restart,

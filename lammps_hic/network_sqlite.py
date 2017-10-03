@@ -109,8 +109,6 @@ class SqliteServer(object):
             self._serversocket.close()
             self._context.term()
 
-        print 'finishing listening thread for %s', self.dbfname
-        sys.stdout.flush()
 
     def close(self):
         tmpcontext = zmq.Context()
