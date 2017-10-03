@@ -2,7 +2,9 @@ from __future__ import print_function, division
 
 import ipyparallel 
 import logging
+logging.basicConfig()
 import threading
+import multiprocessing
 import traceback
 import sys
 import zmq
@@ -73,8 +75,9 @@ class ParallelController(object):
         self._view = None # ipyparallel load balanced view
         self._logger = None # logger
         self._ar = None # async results
-        self._fwrapper = None # function wrapper
+        #self._fwrapper = None # function wrapper
         self._max_batch = max_batch
+        self._queue = multiprocessing.Queue()
 
     def get_status(self):
         return self._status
@@ -96,9 +99,12 @@ class ParallelController(object):
     def get_args(self):
         return self._args
 
-    def _setup(self):
+    def _setup_logger(self, batch_no=None):
         # setup logger
-        self._logger = logging.getLogger(self.name)
+        if batch_no is None:
+            self._logger = logging.getLogger(self.name)
+        else: 
+            self._logger = logging.getLogger(self.name + '/batch%d' % batch_no )
         # keep only stream handlers
         for handler in self._logger.handlers:
             self._logger.removeHandler(handler)
@@ -110,7 +116,7 @@ class ParallelController(object):
         self._logger.setLevel(self.loglevel)
         
         # prepare the remote function
-        self._fwrapper = FunctionWrapper(self._serial_fun, self.const_vars)
+        #self._fwrapper = FunctionWrapper(self._serial_fun, self.const_vars)
 
     def _setup_ipp(self):
         # get client and view instances, and use cloudpickle
@@ -150,54 +156,89 @@ class ParallelController(object):
                      min(len(self.args), (b+1)*self._max_batch)) 
                     for b in range(len(self.args)//self._max_batch + 1)]
 
-    def _run(self):
+    def _run_all(self):
+        self._setup_logger()
+        self.job_batches = self._split_batches()
         got_errors = False
         self.results = [None] * len(self._args)
         self._status = [ParallelController.RUNNING] * len(self._args)
         
-        self._setup()
-        job_batches = self._split_batches()
-
-        for batch_no, (batch_start, batch_end) in enumerate(job_batches):
-            self._logger.info('Starting batch %d of %d: %d tasks', 
-                              batch_no, len(job_batches), 
-                              batch_end - batch_start)
-            self._setup_ipp()
-
-            # maps asyncronously on workers
-            self._ar = self._view.map_async(self._fwrapper, 
-                                            self._args[batch_start:batch_end], 
-                                            chunksize=self.chunksize)
+        self._logger.info('Starting job, divided in %d batches', len(self.job_batches))
         
-            # start a thread to monitor progress
-            self._monitor_flag = True
-            monitor_thread = threading.Thread(target=self._monitor)
-            monitor_thread.start()
-
-            try:
-                # collect results
-                for i, result in enumerate(self._ar):
-                    self.results[i + batch_start] = result
+        tot_time = 0
+        for batch_no, (batch_start, batch_end) in enumerate(self.job_batches):
+            p = multiprocessing.Process(target=self._run_batch, args=(batch_no,))
+            p.start()
+            
+            while True:
+                i, result = self._queue.get()
+                if i >= 0:
+                    self.results[i] = result
                     if result[0] == -1:
                         got_errors = True
-                        self._status[i + batch_start] = ParallelController.FAILED
-                    else:
-                        self._status[i + batch_start] = ParallelController.SUCCESS
+                        self._status[i] = ParallelController.FAILED
+                    elif result:
+                        self._status[i] = ParallelController.SUCCESS
+                elif i == -2:
+                    raise RuntimeError('Process raised error', result)
+                elif i == -3: # batch finished signal
+                    tot_time += result
+                    break
 
-            except:
-                self._monitor_flag = False
-                raise
-            # close the monitor thread and print details
-            monitor_thread.join()
-            self._logger.info('Done. Time elapsed: %s', 
-                              pretty_tdelta(self._ar.elapsed))
-        
+            p.join()
+
+    
         # handle errors if any occurred
         if got_errors:
             self._handle_errors()
             raise RuntimeError('Some jobs failed. Log file: %s' % self.logfile) 
         else:
+            self._logger.info('Done. Time elapsed: %s', 
+            pretty_tdelta(tot_time))
             self._ok = True
+
+
+
+    def _run_batch(self, batch_no):
+        self._setup_logger(batch_no)
+        
+        batch_start, batch_end = self.job_batches[batch_no]
+        self._logger.info('Starting batch %d of %d: %d tasks', 
+                          batch_no + 1, len(self.job_batches), 
+                          batch_end - batch_start)
+        self._setup_ipp()
+
+
+        # maps asyncronously on workers
+        fwrapper = FunctionWrapper(self._serial_fun, self.const_vars)
+        self._ar = self._view.map_async(fwrapper, 
+                                        self._args[batch_start:batch_end], 
+                                        chunksize=self.chunksize)
+    
+        # start a thread to monitor progress
+        self._monitor_flag = True
+        monitor_thread = threading.Thread(target=self._monitor)
+
+        monitor_thread.start()
+
+        try:
+            # collect results
+            for i, r in enumerate(self._ar):
+                self._queue.put((i + batch_start, r))
+        except:
+            self._monitor_flag = False
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            self._queue.put((-2, (exc_type, exc_value, tb_str)))
+
+        self._queue.put((-3, self._ar.elapsed))
+
+        # close the monitor thread and print details
+        self._logger.info('Done. Time elapsed: %s', 
+            pretty_tdelta(self._ar.elapsed))
+        
+        monitor_thread.join()
+        
 
     def _monitor(self):
         while not self._ar.ready() and self._monitor_flag:
@@ -226,8 +267,7 @@ class ParallelController(object):
         if not self._args:
             raise RuntimeError('ParallelController.args not set')
         try:
-            self._setup()
-            self._run()
+            self._run_all()
         finally:
             self._cleanup()
 

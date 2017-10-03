@@ -782,13 +782,13 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
         openmode = 'r+'
 
     with CoordServer(input_crd, mode='r', 
-                     max_memory=max_memory, port=29773) as incrd_srv, \
+                     max_memory=max_memory, port=40000+np.random.randint(1000)) as incrd_srv, \
          CoordServer(output_crd, mode=openmode, shape=incrd_srv.shape, 
-                     max_memory=max_memory, port=29783), \
+                     max_memory=max_memory, port=41000+np.random.randint(1000)), \
          SqliteServer(violations_db, violations_setup, 
-                      mode=openmode, port=28773), \
+                      mode=openmode, port=42000+np.random.randint(1000)), \
          SqliteServer(status_db, status_setup, 
-                      mode=openmode, port=28783):
+                      mode=openmode, port=43000+np.random.randint(1000)):
 
         # check if we have already completed tasks
         with SqliteClient(status_db) as clt:

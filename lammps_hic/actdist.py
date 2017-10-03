@@ -23,16 +23,11 @@ import numpy as np
 from numpy.lib.format import open_memmap
 import time
 import h5py
-import gzip
 import scipy.io
-from itertools import islice
 from .population_coords import PopulationCrdFile
 from .parallel_controller import ParallelController
 from .network_sqlite import SqliteClient, SqliteServer
 from alabtools.utils import HssFile
-
-
-
 
 __author__  = "Guido Polles"
 __license__ = "GPL"
@@ -40,11 +35,10 @@ __version__ = "0.1.0"
 __email__   = "polles@usc.edu"
 
 # specifies the size (in bytes) for chunking the process
-chunk_size_hint = 500 * 1024 * 1024
 actdist_shape = [('i', 'int32'), ('j', 'int32'), ('ad', 'float32'), ('plast', 'float32')]
+actdist_fmt_str = '%6d %6d %10.2f %.5f'
 
-
-def _get_copy_index(index):
+def get_copy_index(index):
     tmp_index = {}
     for i, v in enumerate(index):
         locus = (int(v.chrom), int(v.start), int(v.end))
@@ -92,28 +86,29 @@ def cleanProbability(pij, pexist):
         pclean = pij
     return max(0, pclean)
 
-def _compute_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
+def get_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
     '''
     Serial function to compute the activation distances for a pair of loci 
     It expects some variables to be defined in its scope:
-        'coordinates': a numpy-like array of the coordinates.
-        'radii': a numpy-like array of bead radii
-        'copy_index': a dict specifying all the copies of each locus
-
+        
     Parameters
     ----------
         i (int): index of the first locus
         j (int): index of the second locus
         pwish (float): target contact probability
         plast (float): the last refined probability
+        coordinates (lammps_hic.population_coords.PopulationCrdFile): binary 
+            file containing coordinates.
+        radii (numpy.ndarray): a numpy-like array of bead radii
+        copy_index (dictionary int -> list): a dict specifying the indices of
+            all the copies of each locus
 
     Returns
     -------
-        tuple: contains the following items
-            - i (int)
-            - j (int)
-            - ad (float): the activation distance
-            - p: the refined probability
+        i (int)
+        j (int)
+        ad (float): the activation distance
+        p (float): the corrected probability
     '''
     import numpy as np
     
@@ -171,165 +166,107 @@ def _compute_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
         res = (i, j, activation_distance, p)
     return res
 
-def get_actdists(parallel_client, hss_fname, matrix_memmap, crd_memmap, 
-                 actdist_file, new_actdist_file, theta, 
-                 max_round_size=int(1e7), chunksize=30):
+def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
     '''
-    Compute activation distances using ipyparallel. 
+    The serial function to be mapped by ipyparallel. Processes a batch of 
+    jobs and save results in a database.
 
     Parameters
     ----------
-        parallel_client : ipyparallel.Client
-            an ipyparallel Client instance to send parallel jobs to
-        hss_fname : str 
-            an hss filename containing radii an index
-        matrix_memmap : str 
-            the contact probability matrix file
-        crd_memmap : str 
-            the coordinates file
-        actdist_file : str 
-            last activation distances file.
-        new_actdist_file : str 
-            file where to save the newly computed activation distances
-        theta : float
-            consider only contacts with probability greater or equal to theta
-        max_round_size : int
-            Maximum number of items processed at one time
-        chunksize : int
-            Number of items in a single request to a worker
+    argtuple (tuple): contains the batch ID and the arguments for the batch
+    input_hss (str): a hss file containing the index for the system
+    input_crd (str): the binary input coordinates file
+    status_db (str): a database file where to store completed batches
+    max_memory (str or int): maximum memory used for data by the binary 
+        coordinates manager
 
     Returns
     -------
-        None 
-
-    Raises
-    ------
-        RuntimeError : if the parallel client has no registered workers.
+    results (list): list containing all the valid results (not None) from 
+        `get_actdist` applied to each parameter of the batch.
     '''
 
-    # setup logger
-    logger = logging.getLogger()
-    
-    # check that we have workers ready
-    engine_ids = list(parallel_client.ids)
-    n_workers = len(engine_ids)
-    if n_workers == 0:
-        logger.error('get_actdists(): No Engines Registered')
-        raise RuntimeError('get_actdists(): No Engines Registered')
-    
-    logger.info('Starting contact activation distance job on %s, p = %.3f,'
-                ' %d workers', crd_memmap, theta, n_workers)
-
-    # reads index and radii from the hss file
-    with HssFile(hss_fname) as hss:
-        radii = hss.get_radii()
-        index = hss.get_index()
-
-    # generate an index of the copies of each locus
-    copy_index = _get_copy_index(index)
-
-    # Send static data and open the memmap of the coordinates on workers
-    workers = parallel_client[engine_ids]
-    workers.apply_sync(_load_memmap, 'coordinates', crd_memmap, mode='r')
-    workers['radii'] = radii
-    workers['copy_index'] = copy_index
-    
-    # opens actdists files
-    ad_in = None
-    if actdist_file is not None:
-        ad_in = gzip.open(actdist_file)
-    ad_out = gzip.open(new_actdist_file, 'w')
-
-    # opens probability matrix file
-    pm = open_memmap(matrix_memmap, 'r')
-
-    # process matrix
-    round_num = 0
-    done = False
-    while not done:
-        round_num += 1
-        logger.info('Round number: %d', round_num)
-        start = time.time() 
-
-        # get a chunk of the matrix in memory
-        c0 = (round_num - 1) * max_round_size
-        c1 = round_num * max_round_size
-        if c1 >= len(pm):
-            c1 = len(pm)
-            done = True 
-        items = pm[c0:c1][:]
-
-        # discard items < theta
-        is_used = items >= theta
-        n_used = np.count_nonzero(is_used)
-        # matrix is sorted, if there's an element less than theta,
-        # all the following elements will be < theta
-        if np.size(is_used) - n_used > 0:
-            done = True
-
-        # read the last refined probabilities, if present
-        old_ads = []
-        if ad_in is not None:
-            for line in islice(ad_in, n_used):
-                lsp = line.split()
-                i = int(lsp[0])
-                j = int(lsp[1])
-                p = int(lsp[3])
-                old_ads.append((i, j, p))
-
-        n_ads = len(old_ads)
-
-        # prepare the arguments
-        pargs = []
-        for k in range(n_used):
-            i, j, p = items[k]
-            if k < n_ads:
-                assert old_ads[k][0] == i and old_ads[k][1] == j
-                op = old_ads[k][2]
-            else:
-                op = 0
-            pargs.append((i, j, p, op))
-
-        # send the jobs to the workers
-        workers = parallel_client.load_balanced_view(engine_ids)
-        results = workers.map_async(_compute_actdist, pargs, 
-                                    chunksize=chunksize)
-
-        for r in results:
-            ad_out.write('%d %d %.2f %.4f\n' % r)
-
-        end = time.time()
-        logger.debug('get_actdist(): timing for round %d (%d items): %f', round_num,
-                     n_used, end-start)
-
-def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
+    # connects to the status db server
     status = SqliteClient(status_db)
 
     batch_id, params = argtuple
 
+    # read index and radii
     with HssFile(input_hss) as hss:
         radii = hss.get_radii()
         index = hss.get_index()
 
-    copy_index = _get_copy_index(index)
+    # get the copy index from the index
+    copy_index = get_copy_index(index)
 
+    # opens the coordinates file and loops through the jobs in the batch
     results = []
     with PopulationCrdFile(input_crd, 'r', max_memory=max_memory) as crd:
         for i, j, pwish, plast in params:
-            r = _compute_actdist(i, j, pwish, plast, crd, radii, copy_index)
+            r = get_actdist(i, j, pwish, plast, crd, radii, copy_index)
             if r is not None:
                 results.append(r)
 
+    # save the results as text 
     status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?)', 
                    (batch_id, int(time.time()), len(params), len(results), 
-                    '\n'.join()))
+                    '\n'.join([actdist_fmt_str % x for x in results])))
 
     return results
 
 def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
-                                 sigma, last_ad=[], log=None, 
+                                 sigma, output_file, last_ad=[], log=None, 
                                  args_batch_size=100, task_batch_size=2000, 
                                  ignore_restart=False, max_memory='2GB'):
+    '''
+    Computes the activation distances for HiC restraints, and save them in a
+    text file.
+
+    Parameters
+    ----------
+    run_name (str): ID for the run, database file names will be based on this
+    input_hss (str): hss file with the index for the system (coordinates will
+        be ignored)
+    input_crd (str): binary coordinates file
+    input_matrix (str): a saved scipy.sparse.coo_matrix representing the
+        pairwise contact probabilities.
+    sigma (float): compute activation distances only for contact probabilities
+        greater or equal than sigma
+    output_file (str): output text file written on successful completion
+    last_ad (list, optional): the output, including corrected probabilities
+        from a previous run. Needed for iterative correction
+    log (str, optional): save output and run information on this file
+    args_batch_size (int, default=100): number of pairs to be processed
+        serially in one batch
+    task_batch_size (int, default=2000): split the serial tasks in batches.
+        This seems necessary to keep the communication and memory usage
+        limited and avoid stalling. Each batch will be run on a sub-process
+        to ensure memory is freed after running (apparently there some memory
+        leak internal to ipyparallel)
+    ignore_restart (bool, default=False): if set to `True`, will just over-
+        write previously generated files. The default behavior is to not 
+        re-run previously successfully completed jobs batches.
+    max_memory (str or int, default='2GB'): sets a limit for the RAM memory
+        usage of the coordinates manager on the worker nodes. Useful for 
+        nodes with limited resources. Note that is a limit for coordinates
+        data only, and does not consider the memory required by running
+        the engine or the scripts.
+
+    Returns
+    -------
+    None
+
+    Outputs
+    -------
+    output_file: a text file with the results
+    output_db: a sqlite3 database file with partial results
+
+    Raises
+    ------
+    RuntimeError: if any of the parallel tasks fails, the parallel controller
+        will raise a runtime error with some information on the failure.
+
+    '''
 
     logger = logging.getLogger('HiC-Actdist')
     logger.setLevel(logging.DEBUG)
@@ -342,9 +279,9 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
     pwish = probability_matrix.data[mask]
 
     # get last probabilities 
-    last_prob = {(i, j): p for i, j, _, _, p, _ in last_ad}
+    last_prob = {(i, j): p for i, j, _,  p in last_ad}
 
-    # generate arguments
+    # split jobs arguments in batches
     n_args_batches = len(ii) // args_batch_size
     parallel_args = []
     if len(ii) % args_batch_size != 0:
@@ -372,7 +309,8 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
     pc.set_const('max_memory', max_memory)
     
     # prepare i/o servers
-    status_setup = ('CREATE TABLE completed (batch INT, timestamp INT, batchsize INT, resultsize INT)')
+    status_setup = ('CREATE TABLE completed (batch INT, timestamp INT, '
+                    'batchsize INT, resultsize INT, data TEXT)')
 
     if ignore_restart:
         logger.info('Ignoring completed runs.')
@@ -381,7 +319,7 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
         openmode = 'r+'
 
     with SqliteServer(status_db, status_setup, 
-                      mode=openmode, port=48112):
+                      mode=openmode, port=48000+np.random.randint(1000)):
 
         # check if we have already completed tasks
         with SqliteClient(status_db) as clt:
@@ -394,7 +332,13 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
         pc.args = to_process
         pc.submit()
 
-    if pc.success():
+        if pc.success():
+            logger.info('Job %s completed', run_name)
+            with SqliteClient(status_db) as clt:
+                completed = clt.fetchall('SELECT data FROM completed ORDER BY batch')
+            outtxt = '\n'.join([c[0] for c in completed])
+            with open(output_file, 'w') as outf:
+                outf.write(outtxt)
 
 
-    logger.info('Run %s completed', run_name)
+
