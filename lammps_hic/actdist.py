@@ -24,6 +24,7 @@ from numpy.lib.format import open_memmap
 import time
 import h5py
 import scipy.io
+import os.path
 from .population_coords import PopulationCrdFile
 from .parallel_controller import ParallelController
 from .network_sqlite import SqliteClient, SqliteServer
@@ -37,6 +38,16 @@ __email__   = "polles@usc.edu"
 # specifies the size (in bytes) for chunking the process
 actdist_shape = [('i', 'int32'), ('j', 'int32'), ('ad', 'float32'), ('plast', 'float32')]
 actdist_fmt_str = '%6d %6d %10.2f %.5f'
+
+def read_actdist_file(filename):
+    if os.path.getsize(filename) > 0:
+        ad = np.genfromtxt(filename, dtype=actdist_shape)
+        if len(ad.shape) == 0:
+            ad = [ad]
+        ad = ad.view(np.recarray)
+    else:
+        ad = []
+    return ad
 
 def get_copy_index(index):
     tmp_index = {}
