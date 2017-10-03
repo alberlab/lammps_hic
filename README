@@ -6,64 +6,22 @@ The lammps_hic module is based on ipyparallel. The UI -if ever- will be based
 on Tornado (as a web interface).
 Needs:
 numpy
+scipy
 h5py
 cloudpickle
 ipyparallel
 tornado
 
+pip install numpy scipy h5py cloudpickle ipyparallel tornado
 
-Sub-modules:
+or
 
-1. lammps
-Contains scripts to generate lammps inputs, call lammps and extract coordinates
-and info from the lammps output.
-The main function here is 
- lammps.lammps_minimize(crd, 
-                        radius, 
-                        chrom, 
-                        crd_id, 
-                        tmp_files_dir='/dev/shm', 
-                        log_dir='.', 
-                        **kwargs)
-    crd: numpy array of coordinates
-    radius: float single radius  # TODO: handle multiple radiuses
-    chrom: list of chromosome string for each bead (not only the haploid)
-    crd_id: a string to identify the run, used in filenames
-    tmp_files_dir: directory where to store temporary lammps files (they are 
-                   removed before function returns)
-    log_dir: directory where to store log files in case of error
-    **kwargs: dictionary with arguments for the minimization, default values
-              are in lammps.ARG_DEFAULT
+conda install numpy scipy h5py cloudpickle ipyparallel tornado
 
-returns a pair (crd, info):
-    crd: numpy array of minimized coordinates
-    info: dictionary with information about the run
+At the moment, 4 kind of restraints are supported.
+- HiC pairwise contact probabilities
+- Lamin-DamID nuclear envelope contact probabilities
+- FISH distance distributions
+- SPRITE single cell restraints
 
-2. actdist
-Contains the parallel version of the functions to compute the activation distances.
- actdist.get_actdists(parallel_client,
-                      crd_fname, 
-                      probability_matrix, 
-                      theta, 
-                      last_ad, 
-                      save_to=None)
-    parallel_client: an instance to an ipyparallel.Client()
-    crd_fname: the h5py file of the population
-    probability_matrix: 2D HiC input matrix
-    theta: the ptobability parameter
-    last_ad: the last activation distance structure or an empty iterable. Activation
-             distances are considered here as numpy recarrays with the following
-             items
-              ('i', int),
-              ('j', int),
-              ('pwish', float),
-              ('actdist', float),
-              ('pclean', float),
-              ('pnow', float)] 
-    save_to: filename where to save a text file of the computed activation distances
-
-Sub-packages:
-
-1. webui
-
-
+There are example scripts/notebooks in the example folder
