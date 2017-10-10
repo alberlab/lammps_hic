@@ -1,22 +1,24 @@
 import numpy as np
 from numpy.linalg import norm
 import h5py
-
-from ..actdist import _get_copy_index
-
+from ..lammps_utils import Bond, HarmonicUpperBound, HarmonicLowerBound
 
 
-def apply_fish_restraints(system, crd, index, args):
 
-    copy_index = _get_copy_index(index)
+def apply_fish_restraints(model, crd, radii, index, user_args):
+    
+    copy_index = index.copy_index
 
-    hff = h5py.File(args['fish'], 'r')
-    minradial = 'r' in args['fish_type']
-    maxradial = 'R' in args['fish_type']
-    minpair = 'p' in args['fish_type']
-    maxpair = 'P' in args['fish_type']
+    hff = h5py.File(user_args['fish'], 'r')
+    minradial = 'r' in user_args['fish_type']
+    maxradial = 'R' in user_args['fish_type']
+    minpair = 'p' in user_args['fish_type']
+    maxpair = 'P' in user_args['fish_type']
 
-    struct_id = args['i']
+    struct_id = user_args['i']
+
+    ck = user_args['fish_kspring']
+    tol = user_args['fish_tol']
     
     if minradial:
         probes = hff['probes']
@@ -29,21 +31,15 @@ def apply_fish_restraints(system, crd, index, args):
                 cd[m] = norm(crd[x])
             min_idx = ii[np.argsort(cd)[0]]
 
-            parms = {
-                'style' : BS.HARMONIC_LOWER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : max(0, td - args['fish_tol']),
-            }
-            dummy = system.get_next_dummy()
-            system.bonds.add_bond(system.atoms[min_idx], dummy, parms, BT.FISH_RADIAL)
+            bt = HarmonicLowerBound(k=ck,
+                                    r0=max(0, td - tol))            
+            center = model.get_next_dummy()
+            model.add_bond(min_idx, center, bt, restraint_type=Bond.FISH_RADIAL)
 
-            parms = {
-                'style' : BS.HARMONIC_UPPER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : td + args['fish_tol'],
-            }
-            dummy = system.get_next_dummy()
-            system.bonds.add_bond(system.atoms[min_idx], dummy, parms, BT.FISH_RADIAL)
+            bt = HarmonicUpperBound(k=ck,
+                                    r0=td + tol)
+            center = model.get_next_dummy()
+            model.add_bond(min_idx, center, bt, restraint_type=Bond.FISH_RADIAL)
 
     if maxradial:
         cd = np.zeros(2)
@@ -57,21 +53,15 @@ def apply_fish_restraints(system, crd, index, args):
                 cd[m] = norm(crd[x])
             max_idx = ii[np.argsort(cd)[-1]]
 
-            parms = {
-                'style' : BS.HARMONIC_UPPER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : td + args['fish_tol'],
-            }
-            dummy = system.get_next_dummy()
-            system.bonds.add_bond(system.atoms[max_idx], dummy, parms, BT.FISH_RADIAL)
+            bt = HarmonicUpperBound(k=ck,
+                                    r0=td + tol)
+            center = model.get_next_dummy()
+            model.add_bond(max_idx, center, bt, restraint_type=Bond.FISH_RADIAL)
 
-            parms = {
-                'style' : BS.HARMONIC_LOWER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : max(0, td - args['fish_tol']),
-            }
-            dummy = system.get_next_dummy()
-            system.bonds.add_bond(system.atoms[max_idx], dummy, parms, BT.FISH_RADIAL)
+            bt = HarmonicLowerBound(k=ck,
+                                    r0=max(0, td - tol))            
+            center = model.get_next_dummy()
+            model.add_bond(max_idx, center, bt, restraint_type=Bond.FISH_RADIAL)
 
     if minpair:
         pairs = hff['pairs']
@@ -85,11 +75,8 @@ def apply_fish_restraints(system, crd, index, args):
             
             dmin = minpair_dist[k]
 
-            parms = {
-                'style' : BS.HARMONIC_LOWER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : max(0, dmin - args['fish_tol']),
-            }
+            bt = HarmonicLowerBound(k=ck,
+                                    r0=max(0, dmin - tol))
             cd = np.zeros(n_combinations)
             it = 0
             for m in ii:
@@ -97,22 +84,17 @@ def apply_fish_restraints(system, crd, index, args):
                     x = crd[m]
                     y = crd[n] 
                     cd[it] = norm(x - y)
-                    system.add_bond(system.atoms[m], system.atoms[n], 
-                                    parms, BT.FISH_PAIR)
+                    model.add_bond(m, n, bt, restraint_type=Bond.FISH_PAIR)
                     it += 1
 
-            parms = {
-                'style' : BS.HARMONIC_LOWER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : dmin + args['fish_tol'],
-            }
-            
+            bt = HarmonicUpperBound(k=ck,
+                                    r0=dmin + tol)
+        
             midx = np.argsort(cd)[0]
 
             m = midx // len(jj)
             n = midx % len(jj)
-            system.add_bond(system.atoms[m], system.atoms[n], 
-                            parms, BT.FISH_PAIR)
+            model.add_bond(m, n, bt, restraint_type=Bond.FISH_PAIR)
 
     if maxpair:
         pairs = hff['pairs']
@@ -126,11 +108,8 @@ def apply_fish_restraints(system, crd, index, args):
 
             dmax = maxpair_dist[k]
             
-            parms = {
-                'style' : BS.HARMONIC_UPPER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : dmax + args['fish_tol'],
-            }
+            bt = HarmonicUpperBound(k=ck,
+                                    r0=dmax + tol)
             cd = np.zeros(n_combinations)
             it = 0
             for m in ii:
@@ -138,21 +117,15 @@ def apply_fish_restraints(system, crd, index, args):
                     x = crd[m]
                     y = crd[n] 
                     cd[it] = norm(x - y)
-                    system.add_bond(system.atoms[m], system.atoms[n], 
-                                    parms, BT.FISH_PAIR)
+                    model.add_bond(m, n, bt, restraint_type=Bond.FISH_PAIR)
                     it += 1
 
-            parms = {
-                'style' : BS.HARMONIC_LOWER_BOUND,
-                'k' : args['fish_kspring'],
-                'r' : max(0, dmax - args['fish_tol']),
-            }
-
+            bt = HarmonicLowerBound(k=ck,
+                                    r0=max(0, dmax - tol))
             midx = np.argsort(cd)[-1]  # get the max distance
 
             m = midx // len(jj)
             n = midx % len(jj)
-            system.add_bond(system.atoms[m], system.atoms[n], 
-                            parms, BT.FISH_PAIR)
+            model.add_bond(m, n, bt, restraint_type=Bond.FISH_PAIR)
 
     hff.close()

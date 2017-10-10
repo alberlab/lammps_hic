@@ -1,10 +1,6 @@
 import numpy as np
 from numpy.linalg import norm
-import os
-
 from ..lammps_utils import Bond, HarmonicUpperBound
-from ..actdist import _get_copy_index
-
 
 def read_actdists(ad):
     '''
@@ -28,10 +24,11 @@ def read_actdists(ad):
     assert(ad is not None)
     columns =[('i', int),
               ('j', int),
-              ('pwish', float),
+              #('pwish', float),
               ('actdist', float),
               ('pclean', float),
-              ('pnow', float)]
+              ]
+              #('pnow', float)]
     actdists = []
     if isinstance(ad, str) or isinstance(ad, unicode):
         ad = np.genfromtxt(ad, dtype=columns)
@@ -46,11 +43,11 @@ def apply_hic_restraints(model, crd, radii, index, user_args):
     ad_fname = user_args['actdist']
     ck = user_args['contact_kspring']
     crange = user_args['contact_range']
-    copy_index = _get_copy_index(index)
+    copy_index = index.copy_index
 
     actdists = read_actdists(ad_fname)
 
-    for (i, j, pwish, d, p, pnow) in actdists:
+    for (i, j, d, p) in actdists:
         ii = copy_index[i]
         jj = copy_index[j]
 
