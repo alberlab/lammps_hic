@@ -10,9 +10,12 @@ except:
 import os
 #from .lazyio import PopulationCrdFile
 import threading
+import numpy as np
 
 import sqlite3
 import time
+
+DEFAULT_PORT_RANGE = (16000, 17000)
 
 
 def cfg_name(fname):
@@ -33,6 +36,9 @@ class SqliteServer(object):
                 cur.execute(sqlsetup)
             self.myip = socket.gethostbyname(socket.getfqdn())
             self.host = host
+            if port is None:
+                port = np.random.randint(DEFAULT_PORT_RANGE[0],
+                                         DEFAULT_PORT_RANGE[1])
             self.port = port
             self._serversocket = None
             self._listen_thread = threading.Thread(target=self.run)

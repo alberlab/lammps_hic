@@ -27,11 +27,10 @@ from __future__ import print_function, division
 import numpy
 import numpy.random
 import logging
-from functools import partial
 import time
 from math import acos, sin, cos, pi
 
-from .util import monitor_progress, pretty_tdelta
+from .util import pretty_tdelta
 from .network_coord_io import CoordServer
 from .population_coords import PopulationCrdFile
 from .parallel_controller import ParallelController
@@ -105,7 +104,7 @@ def generate_territories(index, R=5000.0):
     return crds
     
 
-def _write_random_to_server(fname, index, i, R=5000.0):
+def _write_random_to_server(i, fname, index, R=5000.0):
     from network_coord_io import CoordClient
     crd = generate_territories(index, R=R)
     with CoordClient(fname) as client:
@@ -157,7 +156,10 @@ def create_random_population_with_territories(path, index, n_struct,
         # parallel run
         with CoordServer(path, mode='w', shape=(n_struct, n_bead, 3), 
                          max_memory=max_memory):
-            pc = ParallelController(_write_random_to_server)
+            pc = ParallelController(name='RandomPopulation',
+                                    serial_fun=_write_random_to_server,
+                                    args=range(n_struct),
+                                    logfile='random.log')
             pc.set_const('fname', path)
             pc.set_const('index', index)
             pc.submit()

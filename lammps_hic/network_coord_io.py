@@ -11,33 +11,35 @@ import logging
 import os
 #from .lazyio import PopulationCrdFile
 import threading
+import numpy as np
 
 from .population_coords import PopulationCrdFile
+from .globals import default_log_formatter
 
-logger = logging.getLogger()
-fhandler = logging.FileHandler(filename='coord_server.log', mode='a')
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fhandler.setFormatter(formatter)
-logger.addHandler(fhandler)
-logger.setLevel(logging.DEBUG)
-
+DEFAULT_PORT_RANGE = (15000, 16000)
 
 def cfg_name(fname):
         return fname + '.tmp_cfg'
 
 class CoordServer(object):
     def __init__(self, fname, mode='r+', shape=(0, 0, 3), dtype='float32', 
-                 max_memory='2GB', host="*", port=13457):
+                 max_memory='2GB', host="*", port=None, loglevel=logging.INFO):
         self.fname = fname
         self.fp = PopulationCrdFile(fname, mode, shape, dtype, max_memory)
         self.shape = self.fp.shape
         self.myip = socket.gethostbyname(socket.getfqdn())
         self.host = host
+        if port is None:
+            port = np.random.randint(DEFAULT_PORT_RANGE[0], 
+                                     DEFAULT_PORT_RANGE[1])
         self.port = port
         self.serversocket = None
         self.th = threading.Thread(target=self.run)
         self.status = None
         self.error = None
+        self._logger = logging.getLogger('CoordServer(%s)' % fname)
+        self._logger.setFormatter(default_log_formatter)
+        self._logger.setLevel(loglevel)
         
     def recv(self):
         rawmessage = self.serversocket.recv()
@@ -67,40 +69,40 @@ class CoordServer(object):
             with open(self.cfgfile, 'w') as f:
                 json.dump(config, f)
             
-            logger.info('server started and listening on %s' % addr)
+            self._logger.info('Coord server started and listening on %s' % addr)
             
             running = True
             while running:
                 req = self.recv()
-                logger.debug('Got request: %s', req[:2])
+                self._logger.debug('Got request: %s', req[:2])
                 try:
                     # write structure
                     if req[0] == 'ws':
                         i = req[1]
                         crd = req[2]
-                        logger.debug('Write structure request: %d', i)
+                        self._logger.debug('Write structure request: %d', i)
                         self.fp.set_struct(i, crd)
                         self.send([0])
                     # get structure
                     elif req[0] == 'gs':
                         i = req[1]
-                        logger.debug('Get structure request: %d', i)
+                        self._logger.debug('Get structure request: %d', i)
                         self.send([0, self.fp.get_struct(i)])
                     # write bead
                     elif req[0] == 'wb':
                         i = req[1]
                         crd = req[2]
-                        logger.debug('Write bead request: %d', i)
+                        self._logger.debug('Write bead request: %d', i)
                         self.fp.set_bead(i, crd)
                         self.send([0])
                     # get bead
                     elif req[0] == 'gb':
                         i = req[1]
-                        logger.debug('Get bead request: %d', i)
+                        self._logger.debug('Get bead request: %d', i)
                         self.send([0, self.fp.get_bead(i)])
                     # close request
                     elif req[0] == 'q':
-                        logger.debug('Quit signal received. Exiting...')
+                        self._logger.debug('Quit signal received. Exiting...')
                         self.send([0])
                         os.remove(self.cfgfile)
                         self.fp.flush()
@@ -111,13 +113,14 @@ class CoordServer(object):
                         self.send([-1, 'Incorrect request %s', req[0]])
                 except:
                     etype, value, tb = sys.exc_info()
-                    logger.error(traceback.format_exception(etype, value, tb))
+                    self._logger.error(traceback.format_exception(etype, value, tb))
                     infostr = ''.join(traceback.format_exception(etype, value, tb))
                     if not self.serversocket.closed:
                         self.send([-1, infostr])
         except:
             self.status = 'fail'
             self.error = traceback.format_exception(*sys.exc_info())
+            raise 
         finally:
             self.serversocket.setsockopt( zmq.LINGER, 0 )
             self.serversocket.close()
@@ -150,7 +153,7 @@ class CoordServer(object):
 
 class CoordClient(object):
 
-    def __init__(self, fname, wait_for_config=5):
+    def __init__(self, fname, wait_for_config=5, loglevel=logging.INFO):
         cfgfile = cfg_name(fname)
         config = None
         with open(cfgfile, 'r') as f:
@@ -159,11 +162,14 @@ class CoordClient(object):
         self.socket = self.context.socket(zmq.REQ)
         addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
         self.socket.connect(addr)
+        self._logger = logging.getLogger('CoordClient(%s)' % fname)
+        self._logger.setFormatter(default_log_formatter)
+        self._logger.setLevel(loglevel)
 
     def recv(self):
         data = pickle.loads(self.socket.recv())
         if data[0] != 0:
-            logger.error('Error from server: %s', data)
+            self._logger.error('Error from server:\n%s' % data)
             raise RuntimeError('Request Error, server returned: %s' % data)
         if len(data) >= 2: # some get request
             return data[1]
@@ -216,8 +222,3 @@ class CoordClient(object):
         self.socket.close()
         self.context.term()
 
-
-# root = logging.getLogger()
-# for handler in root.handlers[:]:
-#     root.removeHandler(handler)
-# root.addHandler(logging.StreamHandler())
