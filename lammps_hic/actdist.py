@@ -207,14 +207,11 @@ def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
         radii = hss.get_radii()
         index = hss.get_index()
 
-    # get the copy index from the index
-    copy_index = get_copy_index(index)
-
     # opens the coordinates file and loops through the jobs in the batch
     results = []
     with PopulationCrdFile(input_crd, 'r', max_memory=max_memory) as crd:
         for i, j, pwish, plast in params:
-            r = get_actdist(i, j, pwish, plast, crd, radii, copy_index)
+            r = get_actdist(i, j, pwish, plast, crd, radii, index.copy_index)
             if r is not None:
                 results.append(r)
 

@@ -87,6 +87,7 @@ def get_rgs2(np.ndarray[float, ndim=3, mode="c"] crds not None,
     
     return rg2s, best_structure, copy_idxs 
 
+
 def compute_gyration_radius(crd, cluster, index, copy_index):
     '''
     Computes the radius of gyration (Rg) for a set of genomic regions across 
@@ -166,10 +167,14 @@ def compute_gyration_radius(crd, cluster, index, copy_index):
     for s in xrange(n_struct):
         curr_copy_vec = rep_copy_vec[s]
         selected_ii = []
-        for ic, regions in enumerate(regions_by_chrom.values()):
+        ic = 0
+        for regions in regions_by_chrom.values():
+            if not regions:
+                continue
             copy_num = curr_copy_vec[ic]
             for i in regions:
                 selected_ii.append(copy_index[i][copy_num])
+            ic += 1
         full_crd[s, :] = crd[s, selected_ii]
 
     # we alread chose the copy, so we set the number of copies 
@@ -179,8 +184,38 @@ def compute_gyration_radius(crd, cluster, index, copy_index):
     rg2s, best_structure, _ = get_rgs2(full_crd, full_copy_num)
 
     return rg2s, best_structure
-    
 
+def assignment(crd, index, clusters, int n_struct, int keep_best=1000):
+    cdef np.ndarray[int, ndim=1] occupancy = np.zeros(n_struct, dtype=np.int32)
+    cdef int n_clusters = len(clusters)
+    cdef np.ndarray[int, ndim=1] assignment = np.zeros(n_clusters, dtype=np.int32)
+    cdef float aveN = float(n_clusters) / n_struct
+    cdef float stdN = np.sqrt(aveN)
+    
+    cdef float Erange, Emin, kT, Z
+    cdef int pos
+    cdef int ci = 0
+    cdef int max_nrg = keep_best
+    for ci, cluster in enumerate(clusters):
+        rg2s, best = compute_gyration_radius(crd, cluster, index, index.copy_index)
+        order = np.argsort(rg2s)[:max_nrg]
+        best_rgs = rg2s[order]
+        penalizations = np.clip(occupancy[order] - aveN, 0., None)/stdN
+        Emin = best_rgs[0]
+        kT = (best_rgs[1] - best_rgs[0]) /  3
+        E = (best_rgs-best_rgs[0])/kT + penalizations
+        P = np.cumsum(np.exp(-(E-E[0])))
+        Z = P[-1]
+        e = np.random.rand()*Z
+        pos = np.searchsorted(P, e, side='left')
+        si = order[pos]
+        assignment[ci] = si
+        occupancy[si] += 1
+    return assignment
+
+
+
+    
 
 
 

@@ -44,5 +44,5 @@ def apply_damid_restraints(model, crd, radii, index, user_args):
                 continue
             center = model.get_next_dummy()
             bt = HarmonicLowerBound(k=ck, r0=td)
-            model.add_bond(i, center, bt, restraint_type=Bond.DAMID)
+            model.add_bond(k, center, bt, restraint_type=Bond.DAMID)
             

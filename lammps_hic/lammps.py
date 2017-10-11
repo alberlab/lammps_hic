@@ -257,6 +257,7 @@ def create_lammps_script(model, user_args):
 
         # Thermodynamic info style for output
         print('thermo_style custom step temp epair ebond', file=f)
+        print('thermo_modify norm no', file=f)
         print('thermo', user_args['thermo'], file=f)
 
         # ramp excluded volume
