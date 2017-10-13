@@ -38,7 +38,6 @@ class CoordServer(object):
         self.status = None
         self.error = None
         self._logger = logging.getLogger('CoordServer(%s)' % fname)
-        self._logger.setFormatter(default_log_formatter)
         self._logger.setLevel(loglevel)
         
     def recv(self):
@@ -163,7 +162,6 @@ class CoordClient(object):
         addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
         self.socket.connect(addr)
         self._logger = logging.getLogger('CoordClient(%s)' % fname)
-        self._logger.setFormatter(default_log_formatter)
         self._logger.setLevel(loglevel)
 
     def recv(self):
