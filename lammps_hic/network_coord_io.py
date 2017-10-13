@@ -12,9 +12,9 @@ import os
 #from .lazyio import PopulationCrdFile
 import threading
 import numpy as np
+import subprocess
 
 from .population_coords import PopulationCrdFile
-from .globals import default_log_formatter
 
 DEFAULT_PORT_RANGE = (15000, 16000)
 
@@ -27,7 +27,11 @@ class CoordServer(object):
         self.fname = fname
         self.fp = PopulationCrdFile(fname, mode, shape, dtype, max_memory)
         self.shape = self.fp.shape
-        self.myip = socket.gethostbyname(socket.getfqdn())
+        #self.myip = socket.gethostbyname(socket.getfqdn())
+        self.myip = subprocess.check_output('ifconfig eno1 |' 
+                        'grep -Eo \'inet (addr:)?([0-9]*\\.){3}[0-9]*\''
+                        '| grep -Eo \'([0-9]*\\.){3}[0-9]*\' | '
+                        'grep -v \'127.0.0.1\' | head -1', shell=True).strip()
         self.host = host
         if port is None:
             port = np.random.randint(DEFAULT_PORT_RANGE[0], 
@@ -54,6 +58,7 @@ class CoordServer(object):
         try:
             self.context = zmq.Context()
             self.serversocket = self.context.socket(zmq.REP)
+            self.serversocket.setsockopt(zmq.LINGER, 0)
         except:
             self.status = 'fail'
             self.error = traceback.format_exception(*sys.exc_info())
@@ -152,20 +157,29 @@ class CoordServer(object):
 
 class CoordClient(object):
 
-    def __init__(self, fname, wait_for_config=5, loglevel=logging.INFO):
+    def __init__(self, fname, timeout=5, loglevel=logging.INFO):
         cfgfile = cfg_name(fname)
         config = None
         with open(cfgfile, 'r') as f:
             config = json.load(f)
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
+        self.socket.setsockopt(zmq.LINGER, 0)
         addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
         self.socket.connect(addr)
+        self.poller = zmq.Poller()
+        self.poller.register(self.socket, zmq.POLLIN)
         self._logger = logging.getLogger('CoordClient(%s)' % fname)
         self._logger.setLevel(loglevel)
+        self.timeout = timeout
 
     def recv(self):
-        data = pickle.loads(self.socket.recv())
+        if self.poller.poll(self.timeout*1000): # 10s timeout in milliseconds
+            msg = self.socket.recv_json()
+        else:
+            raise IOError("Timeout processing request")
+
+        data = pickle.loads(msg)
         if data[0] != 0:
             self._logger.error('Error from server:\n%s' % data)
             raise RuntimeError('Request Error, server returned: %s' % data)

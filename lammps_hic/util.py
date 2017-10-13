@@ -1,6 +1,6 @@
 import logging
 import os.path
-from .globals import async_check_timeout
+from .globals import async_check_timeout, default_log_formatter
 
 
 def pretty_tdelta(seconds):
@@ -107,3 +107,9 @@ def reverse_readline(fh, buf_size=8192):
     # Don't yield None if the file was empty
     if segment is not None:
         yield segment
+
+def setLogFile(fname, loglevel=logging.INFO):
+    logger = logging.getLogger()
+    fh = logging.FileHandler(fname)
+    fh.setFormatter(default_log_formatter)
+    logger.addHandler(fh)

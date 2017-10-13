@@ -106,10 +106,9 @@ class ParallelController(object):
         else: 
             self._logger = logging.getLogger(self.name + '/batch%d' % batch_no )
         # keep only stream handlers
-        for handler in self._logger.handlers:
-            self._logger.removeHandler(handler)
+        fnames = [fh.baseFilename for fh in self._logger.handlers]
         
-        if self.logfile is not None:
+        if self.logfile is not None and self.logfile not in fnames:
             fh = logging.FileHandler(self.logfile)
             fh.setFormatter(default_log_formatter)
             self._logger.addHandler(fh)
@@ -123,7 +122,7 @@ class ParallelController(object):
         self._client = ipyparallel.Client(context=zmq.Context())
         self._ids = self._client.ids
         self._dview = self._client[self._ids]
-        #self._dview.use_cloudpickle()
+        self._dview.use_cloudpickle()
         self._view = self._client.load_balanced_view(targets=self._ids)
         
     def _cleanup(self):
@@ -180,6 +179,7 @@ class ParallelController(object):
                     elif result:
                         self._status[i] = ParallelController.SUCCESS
                 elif i == -2:
+                    p.join()
                     raise RuntimeError('Process raised error', result)
                 elif i == -3: # batch finished signal
                     tot_time += result
@@ -229,7 +229,7 @@ class ParallelController(object):
             self._monitor_flag = False
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            self._queue.put((-2, (exc_type, exc_value, tb_str)))
+            self._queue.put((-2, tb_str))
 
         self._queue.put((-3, self._ar.elapsed))
 

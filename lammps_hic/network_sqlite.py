@@ -2,7 +2,7 @@ import sys
 import traceback
 import zmq
 import json
-import socket
+import subprocess
 try:
     import cPickle as pickle
 except:
@@ -34,7 +34,11 @@ class SqliteServer(object):
             if sqlsetup is not None:
                 cur = self._db.cursor()
                 cur.execute(sqlsetup)
-            self.myip = socket.gethostbyname(socket.getfqdn())
+            #self.myip = socket.gethostbyname(socket.getfqdn())
+            self.myip = subprocess.check_output('ifconfig eno1 |' 
+                        'grep -Eo \'inet (addr:)?([0-9]*\\.){3}[0-9]*\''
+                        '| grep -Eo \'([0-9]*\\.){3}[0-9]*\' | '
+                        'grep -v \'127.0.0.1\' | head -1', shell=True).strip()
             self.host = host
             if port is None:
                 port = np.random.randint(DEFAULT_PORT_RANGE[0],
@@ -71,6 +75,8 @@ class SqliteServer(object):
             raise RuntimeError('_DB setup failed')
         self._context = zmq.Context()
         self._serversocket = self._context.socket(zmq.REP)
+        self._serversocket.setsockopt(zmq.SNDTIMEO, 5000)
+        self._serversocket.setsockopt(zmq.LINGER, 0)
         cur = self._db.cursor()
         try:
             addr = 'tcp://' + self.host + ':' + str(self.port)
@@ -111,7 +117,6 @@ class SqliteServer(object):
         finally:
             self._db.commit()
             self._db.close()
-            self._serversocket.setsockopt( zmq.LINGER, 0 )
             self._serversocket.close()
             self._context.term()
 
@@ -161,9 +166,16 @@ class SqliteClient(object):
         self._socket = self._context.socket(zmq.REQ)
         addr = 'tcp://' + config['ip'] + ':' + str(config['port'])
         self._socket.connect(addr)
+        self._poller = zmq.Poller()
+        self._poller.register(self._socket, zmq.POLLIN)
 
     def recv(self):
-        data = pickle.loads(self._socket.recv())
+        if self._poller.poll(self.timeout*1000): # 10s timeout in milliseconds
+            msg = self._socket.recv_json()
+        else:
+            raise IOError("Timeout processing request")
+
+        data = pickle.loads(msg)
         if data[0] != 0:
             raise RuntimeError('Request Error, server returned: %s' % data)
         if len(data) >= 2: # some get request
