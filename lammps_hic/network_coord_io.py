@@ -2,7 +2,6 @@ import sys
 import traceback
 import zmq
 import json
-import socket
 try:
     import cPickle as pickle
 except:
@@ -175,7 +174,7 @@ class CoordClient(object):
 
     def recv(self):
         if self.poller.poll(self.timeout*1000): # 10s timeout in milliseconds
-            msg = self.socket.recv_json()
+            msg = self.socket.recv()
         else:
             raise IOError("Timeout processing request")
 
