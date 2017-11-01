@@ -6,9 +6,11 @@ logging.basicConfig()
 import threading
 import multiprocessing
 import traceback
+import os
 import sys
 import zmq
-from functools import partial
+import sqlite3
+import time
 from .globals import default_log_formatter
 
 def pretty_tdelta(seconds):
@@ -19,20 +21,43 @@ def pretty_tdelta(seconds):
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
     return "%dh %02dm %02ds" % (h, m, s)
-        
+
+#TODO: execution time
 
 class FunctionWrapper(object):
-    def __init__(self, inner, const_vars):
+    def __init__(self, inner, const_vars, timeout=None):
+        from functools import partial
         self.inner = partial(inner, **const_vars)
+        self.timeout = timeout
 
-    def __call__(self, *args, **kwargs):
+    def run(self, *args, **kwargs):
         try:
+            from time import time
+            tstart = time()
             res = self.inner(*args, **kwargs)
-            return (0, res)
+            self._q.put( (0, res, time()-tstart) )
         except:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-            return (-1, (exc_type, exc_value, tb_str))
+            self._q.put( (-1, tb_str, None) )
+
+    def __call__(self, *args, **kwargs):
+        try:
+            import multiprocessing
+            from Queue import Empty
+            self._q = multiprocessing.Queue()
+            p = multiprocessing.Process(target=self.run, args=args, kwargs=kwargs)
+            p.start()
+            rval = self._q.get(block=True, timeout=self.timeout)
+            p.join()
+        except Empty:
+            rval = (-1, 'Processing time exceeded (%f)' % self.timeout, None)
+            p.terminate()
+        except:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            rval = (-1, tb_str, None)
+        return rval
 
 
 class ParallelController(object):
@@ -51,13 +76,19 @@ class ParallelController(object):
     def __init__(self, 
                  name='ParallelController',
                  serial_fun=None,
-                 args=[],
-                 const_vars={}, 
+                 args=None,
+                 const_vars=None, 
                  chunksize=1,
                  logfile=None, 
                  loglevel=logging.DEBUG,
                  poll_interval=60,
-                 max_batch=None):
+                 max_batch=None,
+                 max_exec_time=None,
+                 dbfile=None,
+                 fresh_run=False,
+                 retry=3,
+                 commit_timeout=30):
+
         self.name = name
         self._serial_fun = serial_fun # serial function to be mapped
         self._args = args # arguments to be mapped
@@ -69,6 +100,7 @@ class ParallelController(object):
                                            # poll_interval seconds
         self.results = []
         self._status = []
+        self._to_process = []
         self._ok = False # flag for successfull completion
         self.chunksize
         self._client = None # ipyparallel client
@@ -77,7 +109,21 @@ class ParallelController(object):
         self._ar = None # async results
         #self._fwrapper = None # function wrapper
         self._max_batch = max_batch
+        self.max_exec_time = max_exec_time
+        self.retry = retry
         self._queue = multiprocessing.Queue()
+        self.commit_timeout = commit_timeout
+        if self._args is None:
+            self._args = list()
+        if self.const_vars is None:
+            self.const_vars = dict()
+        if dbfile is None:
+            self.dbfile = '%s.db' % name
+        else:
+            self.dbfile = dbfile
+        if fresh_run:
+            if os.path.isfile(dbfile):
+                os.remove(dbfile)
 
     def get_status(self):
         return self._status
@@ -141,57 +187,104 @@ class ParallelController(object):
                 self._logger.error('... %d more errors ...', n_failed - 3)
                 print('... %d more errors ...' % (n_failed - 3), 
                       file=sys.stderr)
+                break
             self._logger.error('JOB# %d:\n %s \n' + '-'*40, i,
-                               self.results[i][1][2])
-            print('JOB# %d:\n %s' % (i, self.results[i][1][2]), 
+                               self.results[i])
+            print('JOB# %d:\n %s' % (i, self.results[i]), 
                   file=sys.stderr)
             print('-'*40, file=sys.stderr)
+        return n_failed
             
     def _split_batches(self):
         if self._max_batch is None:
-            return [(0, len(self.args))]
+            return [(0, len(self._to_process))]
         else:
+            num_batch = len(self._to_process) // self._max_batch
+            if len(self._to_process) % self._max_batch != 0:
+                num_batch += 1
             return [(b*self._max_batch, 
-                     min(len(self.args), (b+1)*self._max_batch)) 
-                    for b in range(len(self.args)//self._max_batch + 1)]
+                     min(len(self._to_process), (b+1)*self._max_batch)) 
+                    for b in range(num_batch)]
+
+    def _check_db(self):
+        create_table = False if os.path.isfile(self.dbfile) else True
+
+        with sqlite3.connect(self.dbfile) as conn:
+            if create_table:
+                conn.execute('CREATE TABLE completed (jid INT, '
+                    'completed_time INT, run_time REAL)')
+            query = 'SELECT jid FROM completed'
+            c = conn.execute(query)
+            completed = {x[0] for x in c.fetchall()}
+            not_completed = set(self._args) - completed
+            self._to_process = list(not_completed)
+            for i in completed:
+                self.results[i] = 0
+                self._status[i] = ParallelController.SUCCESS
 
     def _run_all(self):
         self._setup_logger()
-        self.job_batches = self._split_batches()
-        got_errors = False
         self.results = [None] * len(self._args)
         self._status = [ParallelController.RUNNING] * len(self._args)
-        
-        self._logger.info('Starting job, divided in %d batches', len(self.job_batches))
+        self._check_db()
         
         tot_time = 0
-        for batch_no, (batch_start, batch_end) in enumerate(self.job_batches):
-            p = multiprocessing.Process(target=self._run_batch, args=(batch_no,))
-            p.start()
-            
-            while True:
-                i, result = self._queue.get()
-                if i >= 0:
-                    self.results[i] = result
-                    if result[0] == -1:
-                        got_errors = True
-                        self._status[i] = ParallelController.FAILED
-                    elif result:
-                        self._status[i] = ParallelController.SUCCESS
-                elif i == -2:
+        trial = 0
+        error_count = 0
+        last_commit = time.time()
+        self._start_time = time.time()
+        with sqlite3.connect(self.dbfile) as conn:
+            while trial < self.retry and len(self._to_process):
+                now_completed = []
+                error_count = 0
+                self.job_batches = self._split_batches()
+                self._logger.info('Starting %s - %d jobs, divided in %d batches (trial %d)', 
+                                  self.name, len(self._to_process), len(self.job_batches), trial)
+                for batch_no, (batch_start, batch_end) in enumerate(self.job_batches):
+                    p = multiprocessing.Process(target=self._run_batch, 
+                                                args=(batch_no,))
+                    p.start()
+                    
+                    while True:
+                        # keep the db file updated, so we can read the situation from outside
+                        if time.time() - last_commit > self.commit_timeout:
+                            conn.commit()
+                            last_commit = time.time()
+
+                        i, result = self._queue.get()
+                        if i >= 0:
+                            self.results[i] = result
+                            if result[0] == -1:
+                                error_count += 1
+                                self.results[i] = result[1]
+                                self._status[i] = ParallelController.FAILED
+                            elif result[0] == 0:
+                                self._status[i] = ParallelController.SUCCESS
+                                self.results[i] = result[1]
+                                etime = result[2]
+                                conn.execute('INSERT INTO completed VALUES (?, ?, ?)', 
+                                             (i, int(time.time()), etime))
+                                now_completed.append(i)
+                                
+                        elif i == -2:
+                            p.join()
+                            raise RuntimeError('Process raised error', result)
+                        elif i == -3: # batch finished signal
+                            tot_time += result
+                            break
                     p.join()
-                    raise RuntimeError('Process raised error', result)
-                elif i == -3: # batch finished signal
-                    tot_time += result
-                    break
+                for i in now_completed:
+                    self._to_process.remove(i)
 
-            p.join()
+                if error_count:
+                    self._logger.warning('Got %d errors during the execution, retrying...', error_count)
+                trial += 1
 
-    
         # handle errors if any occurred
-        if got_errors:
-            self._handle_errors()
-            raise RuntimeError('Some jobs failed. Log file: %s' % self.logfile) 
+        if error_count:
+            n_failed = self._handle_errors()
+            raise RuntimeError('%d jobs failed. Log file: %s' % 
+                               (n_failed, self.logfile)) 
         else:
             self._logger.info('Done. Time elapsed: %s', 
             pretty_tdelta(tot_time))
@@ -207,12 +300,13 @@ class ParallelController(object):
                           batch_no + 1, len(self.job_batches), 
                           batch_end - batch_start)
         self._setup_ipp()
-
+        self._logger.info('Working on %d worker engines', len(self._ids))
 
         # maps asyncronously on workers
-        fwrapper = FunctionWrapper(self._serial_fun, self.const_vars)
+        fwrapper = FunctionWrapper(self._serial_fun, self.const_vars, 
+                                   self.max_exec_time)
         self._ar = self._view.map_async(fwrapper, 
-                                        self._args[batch_start:batch_end], 
+                                        self._to_process[batch_start:batch_end], 
                                         chunksize=self.chunksize)
     
         # start a thread to monitor progress
@@ -224,7 +318,7 @@ class ParallelController(object):
         try:
             # collect results
             for i, r in enumerate(self._ar):
-                self._queue.put((i + batch_start, r))
+                self._queue.put((self._to_process[i + batch_start], r))
         except:
             self._monitor_flag = False
             exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -234,7 +328,7 @@ class ParallelController(object):
         self._queue.put((-3, self._ar.elapsed))
 
         # close the monitor thread and print details
-        self._logger.info('Done. Time elapsed: %s', 
+        self._logger.info('Batch completed. Time elapsed: %s', 
             pretty_tdelta(self._ar.elapsed))
         
         monitor_thread.join()

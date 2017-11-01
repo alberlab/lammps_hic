@@ -9,8 +9,9 @@ def get_cluster_size(radii, size_factor):
     return cbrt(size_factor * np.sum(radii**3))
 
 def apply_barcoded_cluster_restraints(model, coord, radii, index, user_args):
-    cluster_file = user_args['bc_cluster'] 
-    size_factor = user_args['bc_cluster_size']
+    cluster_file = user_args['sprite'] 
+    size_factor = user_args['sprite_size']
+    kspring = user_args['sprite_kspring']
     struct_i = user_args['i']
 
     if struct_i < 0:
@@ -36,6 +37,6 @@ def apply_barcoded_cluster_restraints(model, coord, radii, index, user_args):
             centroid = model.add_atom(centroid_type, xyz=centroid_pos) # no excluded volume
 
             for b in beads:
-                bt = HarmonicUpperBound(k=1.0, r0=csize-radii[b])
+                bt = HarmonicUpperBound(k=kspring, r0=csize-radii[b])
                 model.add_bond(centroid, b, bt, Bond.BARCODED_CLUSTER)    
             

@@ -35,19 +35,17 @@ import os.path
 import math
 import logging
 import numpy as np
-import time
 from io import StringIO
 from itertools import groupby
-
+from zipfile import ZipFile
 
 from subprocess import Popen, PIPE
 
-from .util import require_vars, resolve_templates
+from .util import resolve_templates
 from .globals import lammps_executable
 from .restraints import *
 from .lammps_utils import *
-from .network_coord_io import CoordServer
-from .network_sqlite import SqliteClient, SqliteServer
+from .population_coords import PopulationCrdFile
 from .parallel_controller import ParallelController
 
 __author__  = "Guido Polles"
@@ -56,14 +54,18 @@ __version__ = "0.0.1"
 __email__   = "polles@usc.edu"
 
 
+INFO_KEYS = ['final-energy', 'pair-energy', 'bond-energy', 'md-time', 'n_restr', 'n_hic_restr']
+
+
 ARG_DEFAULT = [
     ('nucleus_radius', 5000.0, float, 'default nucleus radius'),
     ('occupancy', 0.2, float, 'default volume occupancy (from 0.0 to 1.0)'),
     ('actdist', None, str, 'activation distances file (ascii text)'),
     ('fish', None, str, 'fish distances file (hdf5)'),
     ('damid', None, str, 'damid activation distances file (ascii text)'),
-    ('bc_cluster', None, str, 'filename of cluster file (hdf5)'),
-    ('bc_cluster_size', 5.0, float, 'inverse of volume occupancy'),
+    ('sprite', None, str, 'filename of SPRITE cluster file (hdf5)'),
+    ('sprite_size', 5.0, float, 'inverse of volume occupancy'),
+    ('sprite_kspring', 1.0, float, 'SPRITE spring constant'),
     ('out', 'out.lammpstrj', str, 'Temporary lammps trajectory file name'),
     ('data', 'input.data', str, 'Temporary lammmps input data file name'), 
     ('lmp', 'minimize.lam', str, 'Temporary lammps script file name'), 
@@ -107,7 +109,7 @@ def validate_user_args(kwargs):
     atypes = {k: t for k, _, t, _ in ARG_DEFAULT}
     for k, v in kwargs.items():
         if k not in args:
-            raise ValueError('Keywords argument %s not recognized.' % k)
+            raise ValueError('Keywords argument \'%s\' not recognized.' % k)
         if v is not None:
             args[k] = atypes[k](v)
 
@@ -460,7 +462,7 @@ def generate_input(crd, radii, index, **kwargs):
     apply_nuclear_envelope_restraints(model, crd, radii, index, args)
     
     apply_consecutive_beads_restraints(model, crd, radii, index, args)
-    
+
     if args['actdist'] is not None:
         apply_hic_restraints(model, crd, radii, index, args)
 
@@ -470,7 +472,7 @@ def generate_input(crd, radii, index, **kwargs):
     if args['fish'] is not None:
         apply_fish_restraints(model, crd, radii, index, args)
 
-    if args['bc_cluster'] is not None:
+    if args['sprite'] is not None:
         apply_barcoded_cluster_restraints(model, crd, radii, index, args)
 
     create_lammps_data(model, args)
@@ -484,9 +486,10 @@ def _check_violations(model, crd, i, tol=0.05):
         rv = bond.get_relative_violation(crd)
         if rv > tol:
             bt = bond.bond_type
-            violations.append((i, bond.restraint_type, bond.i, bond.j,
-                               bt.style_id, rv))
-    return violations
+            violations.append(np.array([i, bond.restraint_type, 
+                                       bond.i.id, bond.j.id,
+                                       bt.style_id, rv], dtype=np.float32))
+    return np.array(violations)
 
 def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm', 
                     check_violations=True, keep_temporary_files=False,
@@ -615,8 +618,7 @@ def lammps_minimize(crd, radii, index, run_name, tmp_files_dir='/dev/shm',
 
     
 def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
-                        str_templates, status_db, check_violations, 
-                        violations_db):
+                        str_templates, check_violations, base_dir):
     '''
     Serial function to be mapped in parallel. //
     It is a wrapper intended to be used only internally by the parallel map
@@ -651,11 +653,9 @@ def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
     None
     
     '''
-
+    
     # importing here so it will be called on the parallel workers
-    from .network_coord_io import CoordClient
-    from alabtools.utils import HssFile
-    from .network_sqlite import SqliteClient
+    from alabtools.analysis import HssFile
     
     tmp_vars = resolve_templates(str_templates, [i])
     run_name = tmp_vars['run_name']
@@ -667,40 +667,40 @@ def _setup_and_run_task(i, lammps_args, input_crd, output_crd, input_hss,
     with HssFile(input_hss, 'r') as f:
         radii = f.radii
         index = f.index
-        n_beads = len(radii)
 
-    # connects to the coordinates server
-    with CoordClient(input_crd) as f:
+    # gets coordinates
+    with PopulationCrdFile(input_crd) as f:
         crd = f.get_struct(i)
     
-    # connects to the status server
-    status = SqliteClient(status_db)
+    # perform minimization
+    new_crd, info, violations = lammps_minimize(crd, radii, index, run_name, 
+                                                check_violations=check_violations,
+                                                **lammps_args)
+
+    np.save(base_dir + '/%d.outcrd.npy' % i, new_crd)
+
+    with open(base_dir + '/%d.info.txt' % i, 'w') as f: 
+        for k in INFO_KEYS:
+            if isinstance(info[k], float):
+                out_str = '{:9.2f}'.format(info[k])
+            elif isinstance(info[k], int):
+                out_str = '{:7d}'.format(info[k])
+            else:
+                out_str = str(info[k])
+            f.write(out_str + '\t')
 
     if check_violations:
-        violations_cl = SqliteClient(violations_db)
+        np.save(base_dir + '/%d.violations.npy' % i, violations)
 
-    # perform minimization
-    new_crd, info, violations = lammps_minimize(crd, radii, index, run_name, **lammps_args)
-    
-    # outputs coordinates
-    with CoordClient(output_crd) as f:
-        f.set_struct(i, new_crd[:n_beads])
+    return 0
 
-    if check_violations and violations:
-        violations_cl.executemany('INSERT INTO violations VALUES ' +
-                                  '(?, ?, ?, ?, ?, ?)', violations)
-
-    # set as complete 
-    status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?, ?)', 
-                   (i, int(time.time()), info['final-energy'],
-                    info['pair-energy'], info['bond-energy'],
-                    info['md-time']))
 
 
 def minimize_population(run_name, input_hss, input_crd, output_crd,
-                        n_struct, workdir='.', tmp_files_dir='/dev/shm',
-                        ignore_restart=False, log=None, lammps_args={},
-                        check_violations=False, max_memory='2GB'):
+                        n_struct, workdir='./modeling', tmp_files_dir='/dev/shm',
+                        ignore_restart=False, lammps_args={},
+                        check_violations=False, max_memory='2GB',
+                        max_exec_time=600):
     '''
     Parameters
     ---------- 
@@ -744,20 +744,26 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
 
     '''
 
-    logger = logging.getLogger('minimize_population()')
+    logger = logging.getLogger('MinimizePopulation')
     logger.setLevel(logging.DEBUG)
 
     # Decide file names
     ndigit = len(str(n_struct))
-    status_db = run_name + '.status.db'
-    violations_db = run_name + '.violations.db'
+    status_db = os.path.join(workdir, 'db', run_name + '.minimize.db')
+    #violations_db = run_name + '.violations.db'
     str_templates = {
         'run_name' : run_name + '-{0:0#d}'.replace('#',str(ndigit))
     }
 
-    pc = ParallelController(name=run_name, 
-                            logfile=log, 
-                            serial_fun=_setup_and_run_task)
+    with PopulationCrdFile(input_crd) as f:
+        shape = f.shape
+
+    pc = ParallelController(name='LAMMPS/' + run_name, 
+                            serial_fun=_setup_and_run_task,
+                            dbfile=status_db,
+                            fresh_run=ignore_restart,
+                            max_batch=5000,
+                            max_exec_time=max_exec_time)
 
     # set the variables on the workers
     pc.set_const('lammps_args', lammps_args)
@@ -765,42 +771,42 @@ def minimize_population(run_name, input_hss, input_crd, output_crd,
     pc.set_const('output_crd', output_crd)
     pc.set_const('input_hss', input_hss)
     pc.set_const('str_templates', str_templates)
-    pc.set_const('status_db', status_db)
-    pc.set_const('violations_db', violations_db)
     pc.set_const('check_violations', check_violations)
+    pc.set_const('base_dir', os.path.join(workdir, 'tmp'))
 
     # prepare i/o servers
-    violations_setup = ('CREATE TABLE violations (struct INT, '
-        'restraint_type INT, i INT, j INT, style INT, rv REAL)')
-    status_setup = ('CREATE TABLE completed (struct INT, '
-        'timestamp INT, efinal REAL, epair REAL, ebond REAL, '
-        'mdtime REAL)')
+    #violations_setup = ('CREATE TABLE violations (struct INT, '
+    #    'restraint_type INT, i INT, j INT, style INT, rv REAL)')
+    to_process = range(n_struct)
+    pc.args = to_process
+    pc.submit()
 
-    if ignore_restart:
-        logger.info('Ignoring completed runs.')
-        openmode = 'w'
-    else:
-        openmode = 'r+'
+    # write coordinates
+    n_beads = shape[1]
+    with PopulationCrdFile(output_crd, 'w', shape=shape) as f:
+        for i in to_process:
+            crd = np.load(os.path.join(workdir, 'tmp', '%d.outcrd.npy' % i))
+            f.set_struct(i, crd[:n_beads]) # note that we discard all the positions of added atoms
 
-    with CoordServer(input_crd, mode='r', 
-                     max_memory=max_memory, port=40000+np.random.randint(1000)) as incrd_srv, \
-         CoordServer(output_crd, mode=openmode, shape=incrd_srv.shape, 
-                     max_memory=max_memory, port=41000+np.random.randint(1000)), \
-         SqliteServer(violations_db, violations_setup, 
-                      mode=openmode, port=42000+np.random.randint(1000)), \
-         SqliteServer(status_db, status_setup, 
-                      mode=openmode, port=43000+np.random.randint(1000)):
+    # write info
+    with open(os.path.join(workdir, 'reports', '%s.info' % run_name), 'w') as outf:
+        outf.write('#')
+        for k in INFO_KEYS:
+            outf.write(k + '\t')
+        outf.write('\n')
+        for i in to_process:
+            with open(os.path.join(workdir, 'tmp', '%d.info.txt' % i)) as inf:
+                outf.write(inf.read() + '\n')
 
-        # check if we have already completed tasks
-        with SqliteClient(status_db) as clt:
-            completed = clt.fetchall('SELECT struct from completed')
-        to_process = [x for x in range(n_struct) if x not in completed]
-        logger.info('%d jobs completed, %d jobs to be submitted.', 
-                    len(completed), len(to_process))
+    # compact violations
+    if check_violations:
+        with ZipFile(os.path.join(workdir, 'reports', '%s.violations.npz' % run_name), 'w') as zf:
+            for i in to_process:
+                zf.write(os.path.join(workdir, 'tmp', '%d.violations.npy' % i))
 
-        # map the jobs to the workers
-        pc.args = to_process
-        pc.submit()
-
-    logger.info('Run %s completed', run_name)
-
+    # cleanup
+    for i in to_process:
+        os.remove(os.path.join(workdir, 'tmp', '%d.outcrd.npy' % i))
+        os.remove(os.path.join(workdir, 'tmp', '%d.info.txt' % i))
+        if check_violations:
+            os.remove(os.path.join(workdir, 'tmp', '%d.violations.npy' % i))

@@ -22,18 +22,18 @@ def read_actdists(ad):
     - pnow (float): the current contact probability
     '''
     assert(ad is not None)
-    columns =[('i', int),
-              ('j', int),
+    columns =[('i', np.int32),
+              ('j', np.int32),
               #('pwish', float),
-              ('actdist', float),
-              ('pclean', float),
+              ('actdist', np.float32),
+              ('pclean', np.float32),
               ]
               #('pnow', float)]
     actdists = []
     if isinstance(ad, str) or isinstance(ad, unicode):
-        ad = np.genfromtxt(ad, dtype=columns)
-        if ad.shape == ():
-            ad = np.array([ad])
+        actdists = np.genfromtxt(ad, dtype=columns)
+        if actdists.shape == ():
+            actdists = np.array([actdists])
     else:
         actdists = ad
     return actdists

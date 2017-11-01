@@ -227,3 +227,55 @@ class PopulationCrdFile(object):
             self.fd.close()
         except:
             pass
+
+def transpose_popcrd_ondisk(fin, fout, max_memory='3GB', dtype='float32'):
+    max_memory = parseSize(max_memory)
+    pin = PopulationCrdFile(fin, 'r', dtype='float32', max_memory=max_memory//2)
+    newshape = np.array([pin.shape[1], pin.shape[0], 3])
+    pout = PopulationCrdFile(fout, 'w', dtype='float32', shape=newshape, 
+                             max_memory=max_memory//2)
+    for i in range(pin.nbead):
+        pout.set_struct(i, pin.get_bead(i))
+
+
+def transpose_popcrd_onmemory(fin, fout, max_memory='3GB', dtype='float32'):
+    max_memory = parseSize(max_memory)
+    pin = PopulationCrdFile(fin, 'r', dtype='float32', max_memory=max_memory//2)
+    newshape = np.array([pin.shape[1], pin.shape[0], 3])
+    pout = PopulationCrdFile(fout, 'w', dtype='float32', shape=newshape, 
+                             max_memory=max_memory//2)
+    #for i in range(pin.nbead):
+        #pout.set_struct(i, pin.get_bead(i))
+    crd = pin.get_all()
+    crd = np.asarray(np.swapaxes(crd, 0, 1), order ="C", dtype=np.float32)
+    pout.fd.seek(pout.headersize)
+    crd.tofile(pout.fd)
+
+
+class TransposedMatAcc(object):
+    '''
+    This class provides an interface to a transposed binary crd file created 
+    by transpose_popcrd_* functions, so that slice access as [:, [1, 2, 3], :] 
+    will return all the coordinates for beads [1, 2, 3].
+    Transposing the file makes access a lot faster during HiC and SPRITE 
+    calculations.
+    '''
+    def __init__(self, fname):
+        self.p = PopulationCrdFile(fname)
+        s, b, _ = self.p.shape
+        self.shape = np.array([b, s, 3])
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            structs, beads, xyz  = key
+            if isinstance(beads, int):
+                return self.p.get_struct(beads)
+            elif isinstance(beads, slice):
+                raise NotImplementedError(str(type(beads)))
+            else:
+                #assume iterable
+                try:
+                    return np.swapaxes(
+                        np.array([self.p.get_struct(e) for e in beads]),
+                        0, 1)
+                except TypeError:
+                    raise NotImplementedError(str(type(beads)))

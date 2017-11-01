@@ -24,12 +24,15 @@ def cfg_name(fname):
 class SqliteServer(object):
     READY = 1
     FAIL = -1
-    def __init__(self, dbfname, sqlsetup=None, mode='r+', host="*", port=13558):
+    def __init__(self, dbfname, sqlsetup=None, mode='r+', host="*", port=None):
         try:
             self.dbfname = dbfname
-            if mode == 'w':
-                if os.path.isfile(dbfname):
+            if os.path.isfile(dbfname):
+                if mode == 'w':
                     os.remove(dbfname)
+                else:
+                    # the db already exists, probably the setup has already run
+                    sqlsetup = None
             self._db = sqlite3.connect(dbfname)
             if sqlsetup is not None:
                 cur = self._db.cursor()
@@ -147,7 +150,7 @@ class SqliteServer(object):
 
 class SqliteClient(object):
 
-    def __init__(self, fname, wait_for_config=5):
+    def __init__(self, fname, wait_for_config=5, timeout=5):
         cfgfile = cfg_name(fname)
         config = None
         trial = 0
@@ -168,10 +171,11 @@ class SqliteClient(object):
         self._socket.connect(addr)
         self._poller = zmq.Poller()
         self._poller.register(self._socket, zmq.POLLIN)
+        self.timeout = timeout
 
     def recv(self):
         if self._poller.poll(self.timeout*1000): # 10s timeout in milliseconds
-            msg = self._socket.recv_json()
+            msg = self._socket.recv()
         else:
             raise IOError("Timeout processing request")
 
@@ -235,6 +239,7 @@ class SqliteClient(object):
         return self
 
     def __exit__(self, type, value, traceback):
-        self._socket.setsockopt( zmq.LINGER, 0 )
-        self._socket.close()
-        self._context.term()
+        try:
+            self.close()
+        except:
+            pass

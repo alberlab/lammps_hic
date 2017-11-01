@@ -75,3 +75,6 @@ def test2():
     assert (best1 == best2)
     assert np.all(np.abs(gg - rg2s) < 0.0001)
     return True
+
+test1()
+test2()

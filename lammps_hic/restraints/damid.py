@@ -2,7 +2,6 @@ import numpy as np
 from numpy.linalg import norm
 import os.path
 
-from ..actdist import _get_copy_index
 from ..lammps_utils import Bond, HarmonicLowerBound
 
 
@@ -23,7 +22,7 @@ def read_damid(damid):
 def apply_damid_restraints(model, crd, radii, index, user_args):
     
     damid_actdists = read_damid(user_args['damid'])
-    copy_index = _get_copy_index(index)
+    copy_index = index.copy_index
     ck = user_args['damid_kspring']
     
     for item in damid_actdists:

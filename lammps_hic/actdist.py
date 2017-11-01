@@ -21,14 +21,13 @@
 import logging
 import numpy as np
 from numpy.lib.format import open_memmap
-import time
 import h5py
 import scipy.io
+import os
 import os.path
-from .population_coords import PopulationCrdFile
+from .population_coords import TransposedMatAcc
 from .parallel_controller import ParallelController
-from .network_sqlite import SqliteClient, SqliteServer
-from alabtools.utils import HssFile
+from alabtools.analysis import HssFile
 
 __author__  = "Guido Polles"
 __license__ = "GPL"
@@ -123,7 +122,7 @@ def get_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
     '''
     import numpy as np
     
-    n_struct = coordinates.nstruct
+    n_struct = coordinates.shape[0]
     ii = copy_index[i]
     jj = copy_index[j]
 
@@ -136,8 +135,8 @@ def get_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
     it = 0  
     for k in ii:
         for m in jj:
-            x = coordinates.get_bead(k)
-            y = coordinates.get_bead(m) 
+            x = coordinates[:, k, :]
+            y = coordinates[:, m, :] 
             d_sq[it] = np.sum(np.square(x - y), axis=1)
             it += 1
     
@@ -177,7 +176,7 @@ def get_actdist(i, j, pwish, plast, coordinates, radii, copy_index):
         res = (i, j, activation_distance, p)
     return res
 
-def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
+def _setup_and_run_task(batch_id, input_hss, input_crd, work_dir):
     '''
     The serial function to be mapped by ipyparallel. Processes a batch of 
     jobs and save results in a database.
@@ -197,45 +196,43 @@ def _setup_and_run_task(argtuple, input_hss, input_crd, status_db, max_memory):
         `get_actdist` applied to each parameter of the batch.
     '''
 
-    # connects to the status db server
-    status = SqliteClient(status_db)
-
-    batch_id, params = argtuple
-
     # read index and radii
     with HssFile(input_hss) as hss:
         radii = hss.get_radii()
         index = hss.get_index()
 
+    # read params
+    params = np.load('%s/%d.in.npy' % (work_dir, batch_id))
+
     # opens the coordinates file and loops through the jobs in the batch
     results = []
-    with PopulationCrdFile(input_crd, 'r', max_memory=max_memory) as crd:
-        for i, j, pwish, plast in params:
-            r = get_actdist(i, j, pwish, plast, crd, radii, index.copy_index)
-            if r is not None:
-                results.append(r)
+    crd = TransposedMatAcc(input_crd)
+    for i, j, pwish, plast in params:
+        r = get_actdist(int(i), int(j), pwish, plast, crd, radii, index.copy_index)
+        if r is not None:
+            results.append(r)
 
     # save the results as text 
-    status.execute('INSERT INTO completed VALUES (?, ?, ?, ?, ?)', 
-                   (batch_id, int(time.time()), len(params), len(results), 
-                    '\n'.join([actdist_fmt_str % x for x in results])))
+    with open('%s/%d.out.tmp' % (work_dir, batch_id), 'w') as f:
+        f.write('\n'.join([actdist_fmt_str % x for x in results]))
 
-    return results
+    return 0
 
 def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
-                                 sigma, output_file, last_ad=[], log=None, 
+                                 sigma, output_file, last_ad=None, log=None, 
                                  args_batch_size=100, task_batch_size=2000, 
-                                 ignore_restart=False, max_memory='2GB'):
+                                 ignore_restart=False, base_dir='./modeling'):
     '''
     Computes the activation distances for HiC restraints, and save them in a
     text file.
 
     Parameters
     ----------
-    run_name (str): ID for the run, database file names will be based on this
+    run_name (str): ID for the run, database file names  and the temporary
+        files directory will be based on this
     input_hss (str): hss file with the index for the system (coordinates will
         be ignored)
-    input_crd (str): binary coordinates file
+    input_crd (str): binary coordinates file.
     input_matrix (str): a saved scipy.sparse.coo_matrix representing the
         pairwise contact probabilities.
     sigma (float): compute activation distances only for contact probabilities
@@ -254,11 +251,7 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
     ignore_restart (bool, default=False): if set to `True`, will just over-
         write previously generated files. The default behavior is to not 
         re-run previously successfully completed jobs batches.
-    max_memory (str or int, default='2GB'): sets a limit for the RAM memory
-        usage of the coordinates manager on the worker nodes. Useful for 
-        nodes with limited resources. Note that is a limit for coordinates
-        data only, and does not consider the memory required by running
-        the engine or the scripts.
+    base_dir (str): directory where temporary directory will be created
 
     Returns
     -------
@@ -276,8 +269,12 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
 
     '''
 
-    logger = logging.getLogger('HiC-Actdist')
+    logger = logging.getLogger('HiC-Actdist/%s' % run_name)
     logger.setLevel(logging.DEBUG)
+
+    hic_dir = os.path.join(base_dir, 'HIC/%s' % run_name)
+
+    os.system('mkdir -p %s' % hic_dir )
 
     # read input map
     probability_matrix = scipy.io.mmread(input_matrix)
@@ -287,66 +284,57 @@ def compute_activation_distances(run_name, input_hss, input_crd, input_matrix,
     pwish = probability_matrix.data[mask]
 
     # get last probabilities 
-    last_prob = {(i, j): p for i, j, _,  p in last_ad}
+    if last_ad is not None:
+        last_prob = {(i, j): p for i, j, _,  p in last_ad}
+    else:
+        last_prob = {}
 
     # split jobs arguments in batches
     n_args_batches = len(ii) // args_batch_size
-    parallel_args = []
+    
     if len(ii) % args_batch_size != 0:
         n_args_batches += 1
     for b in range(n_args_batches):
         start = b * args_batch_size
         end = min((b+1) * args_batch_size, len(ii))
-        params = [(ii[k], jj[k], pwish[k], last_prob.get((ii[k], jj[k]), 0.))
-                for k in range(start, end)]
-        arg = (b, params)
-        parallel_args.append(arg)   
+        params = np.array([(ii[k], jj[k], pwish[k], last_prob.get((ii[k], jj[k]), 0.))
+                          for k in range(start, end)], dtype=np.float32)
+        np.save('%s/%d.in.npy' % (hic_dir, b), params)
 
     # Decide file names
-    status_db = run_name + '.status.db'
+    status_db = base_dir + '/db/%s.hic.db' % run_name
 
-    pc = ParallelController(name=run_name, 
+    pc = ParallelController(name='HiC-Actdist/' + run_name, 
                             logfile=log, 
                             serial_fun=_setup_and_run_task,
-                            max_batch=task_batch_size)
+                            max_batch=task_batch_size,
+                            dbfile=status_db,
+                            fresh_run=ignore_restart)
 
     # set the variables on the workers
     pc.set_const('input_hss', input_hss)
     pc.set_const('input_crd', input_crd)
-    pc.set_const('status_db', status_db)
-    pc.set_const('max_memory', max_memory)
+    pc.set_const('work_dir', hic_dir)
     
-    # prepare i/o servers
-    status_setup = ('CREATE TABLE completed (batch INT, timestamp INT, '
-                    'batchsize INT, resultsize INT, data TEXT)')
+    to_process = range(n_args_batches)
 
-    if ignore_restart:
-        logger.info('Ignoring completed runs.')
-        openmode = 'w'
-    else:
-        openmode = 'r+'
+    # map the jobs to the workers
+    pc.args = to_process
+    pc.submit()
 
-    with SqliteServer(status_db, status_setup, 
-                      mode=openmode, port=48000+np.random.randint(1000)):
+    # if the job fails, pc should raise an exception
+    # so if we get here all should be good
+    logger.info('Job %s completed', run_name)
+    
+    with open(output_file, 'w') as outfile:
+        for i in to_process:
+            with open('%s/%d.out.tmp' % (hic_dir, i)) as infile:
+                outfile.write(infile.read() + '\n')
 
-        # check if we have already completed tasks
-        with SqliteClient(status_db) as clt:
-            completed = clt.fetchall('SELECT batch from completed')
-        to_process = [parallel_args[x] for x in range(n_args_batches) if x not in completed]
-        logger.info('%d jobs completed, %d jobs to be submitted.', 
-                    len(completed), len(to_process))
-
-        # map the jobs to the workers
-        pc.args = to_process
-        pc.submit()
-
-        if pc.success():
-            logger.info('Job %s completed', run_name)
-            with SqliteClient(status_db) as clt:
-                completed = clt.fetchall('SELECT data FROM completed ORDER BY batch')
-            outtxt = '\n'.join([c[0] for c in completed])
-            with open(output_file, 'w') as outf:
-                outf.write(outtxt)
-
+    # cleanup
+    for i in to_process:
+        os.remove('%s/%d.out.tmp' % (hic_dir, i))
+        os.remove('%s/%d.in.npy' % (hic_dir, i))
+    os.rmdir(hic_dir)
 
 

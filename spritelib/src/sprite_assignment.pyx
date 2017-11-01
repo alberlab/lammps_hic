@@ -88,7 +88,8 @@ def get_rgs2(np.ndarray[float, ndim=3, mode="c"] crds not None,
     return rg2s, best_structure, copy_idxs 
 
 
-def compute_gyration_radius(crd, cluster, index, copy_index):
+def compute_gyration_radius(crd, cluster, index, copy_index, 
+                            full_check=False):
     '''
     Computes the radius of gyration (Rg) for a set of genomic regions across 
     a whole population of structures.
@@ -96,6 +97,9 @@ def compute_gyration_radius(crd, cluster, index, copy_index):
     Note that in case of multiple copies of a chromosome, a selection
     of the beads corresponding to the regions is performed (see `Notes`
     below.
+
+    For performance reasons, the selection is made by randomly selecting only
+    one bead per chromosome involved (a `representative`).
 
     Parameters
     ----------
@@ -105,6 +109,9 @@ def compute_gyration_radius(crd, cluster, index, copy_index):
     copy_index (list of list) : the bead indexes corresponding to
         each region in the system. In a diploid genome, each region
         maps to 2 beads, in a quadruploid genome to 4 beads, etc.
+    full_check (bool) : whether the final Rg's are computed on the 
+        selected representatives only (False, default), or on all the
+        cluster beads (True).
 
     Returns
     -------
@@ -136,56 +143,107 @@ def compute_gyration_radius(crd, cluster, index, copy_index):
     regions.
     '''
 
-    # Group by regions
-    n_regions = len(cluster)
+    cdef int n_regions = len(cluster)
     all_chroms = set(index.chrom)
-    n_struct = crd.shape[0]
+    cdef int n_struct = crd.shape[0]
+    cdef int i
+    cdef int c
+    
+    # Group regions by chromosome
     regions_by_chrom = {c: list() for c in all_chroms}
     for i in cluster:
         c = index.chrom[i]
         regions_by_chrom[c].append(i)
 
-    # Select representatives
-    representative_regions = [x[0] for x in regions_by_chrom.values() if len(x)]
-    representative_beads = []
-    for i in representative_regions:
-        representative_beads += copy_index[i]
+    # Select one representative region for each chromosome                                                          
+    cdef np.ndarray[int, ndim=1] representative_regions = np.array(
+        [np.random.choice(x) for x in regions_by_chrom.values() if len(x)], dtype='i4')
 
-    rep_copies_num = np.array([len(copy_index[i]) 
-                              for i in representative_regions], dtype='i4')
-    
-    # Select best combinations of representatives
-    rep_crd = crd[:, representative_beads, :].astype('f4')
+    # select all the copies for each representative region
+    cdef np.ndarray[int, ndim=1] representative_beads = np.array(np.concatenate(
+        [copy_index[i] for i in representative_regions]), dtype='i4')
+
+    # count the number of copies for each representative region
+    cdef np.ndarray[int, ndim=1] rep_copies_num = np.array(
+        [len(copy_index[i]) for i in representative_regions], dtype='i4')
+
+    # hdf5 files require to ask indexes in order
+    horder = np.argsort(representative_beads)
+    rorder = np.empty(len(representative_beads), dtype=np.int32)
+    rorder[horder] = np.arange(len(representative_beads))
+    tmp_crd = crd[:, representative_beads[horder], :].astype('f4')
+
+    # rep_crd are the coordinates of all the copies of each representative
+    # region, ordered by chromosomes 
+    rep_crd = tmp_crd[:, rorder, :]
+
     rep_crd = np.asarray(rep_crd, order='C')
+    cdef np.ndarray[int, ndim=2] rep_copy_vec
     rrg, rmin, rep_copy_vec = get_rgs2(rep_crd, rep_copies_num)
     
+    # if we have only the partial check, return here
+    if not full_check:
+        return rrg, rmin
+
+    # reclaim memory
+    del tmp_crd
+    del rep_crd
+
     # compute rg for the full regions by using the copy selection at the 
     # previous step
 
-    full_crd = np.empty((n_struct, n_regions, 3), dtype='f4')
-    full_crd = np.asarray(full_crd, order='C')
-    for s in xrange(n_struct):
-        curr_copy_vec = rep_copy_vec[s]
-        selected_ii = []
-        ic = 0
-        for regions in regions_by_chrom.values():
-            if not regions:
-                continue
-            copy_num = curr_copy_vec[ic]
-            for i in regions:
-                selected_ii.append(copy_index[i][copy_num])
-            ic += 1
-        full_crd[s, :] = crd[s, selected_ii]
+    # all the regions involved in the clusters, ordered by chromosome
+    cdef np.ndarray[int, ndim=1] all_regions = np.array(np.concatenate(
+        [x for x in regions_by_chrom.values() if len(x)]), dtype='i4')
+
+    # all the possible beads, i.e. the indexes of all the copies of all 
+    # the regions
+    cdef np.ndarray[int, ndim=1] all_beads = np.array(np.concatenate(
+        [copy_index[i] for i in all_regions]), dtype='i4')
+    
+    # number of regions for each chromosome
+    cdef np.ndarray[int, ndim=1] num_regions_in_chrom = np.array(
+        [len(x) for x in regions_by_chrom.values() if len(x)], dtype='i4')
+
+    # mark the positions where regions change chromosome
+    cdef np.ndarray[int, ndim=1] chrom_end = np.array(
+        np.cumsum(num_regions_in_chrom), dtype='i4')
+
+    # mark the positions of each region in the all_bead vector.
+    cdef np.ndarray[int, ndim=1] region_start = np.array(np.cumsum(
+        [0] + [len(copy_index[i]) for i in all_regions]), dtype='i4')
+
+    # obtain only the subset of coordinates needed for this computation
+    cdef np.ndarray[float, ndim=3] all_crd = crd[:, all_beads, :] 
+
+    # full_crd are the final set of coordinates after copy selection
+    cdef np.ndarray[float, ndim=3] full_crd = np.empty((n_struct, n_regions, 3), 
+                                                       dtype='f4')
+    
+    cdef int istruct, ibead, ichrom, iregion 
+    cdef np.ndarray[int, ndim=1] curr_copy_vec
+    cdef np.ndarray[int, ndim=1] selected_ii = np.zeros(n_regions, dtype='i4')
+    for istruct in range(n_struct):
+        ichrom = 0 # index of the current chromosome
+        for iregion, region in enumerate(all_regions):
+            if iregion >= chrom_end[ichrom]:
+               ichrom += 1
+            # iregion is the index of the region, ibead is the index of the 
+            # selected copy in the all_crd array
+            ibead = region_start[iregion] + rep_copy_vec[istruct][ichrom]
+            selected_ii[iregion] = ibead
+        full_crd[istruct, :] = all_crd[istruct][selected_ii, :]
 
     # we alread chose the copy, so we set the number of copies 
     # for each region to 1
     full_copy_num = np.array([1] * n_regions, dtype='i4')
 
+    # get the squared Rg's, ignore the trivial copy vector 
     rg2s, best_structure, _ = get_rgs2(full_crd, full_copy_num)
-
     return rg2s, best_structure
+    
 
-def assignment(crd, index, clusters, int n_struct, int keep_best=1000):
+def assignment(crd, index, clusters, int n_struct, int keep_best=1000, int max_chrom_num=8):
     cdef np.ndarray[int, ndim=1] occupancy = np.zeros(n_struct, dtype=np.int32)
     cdef int n_clusters = len(clusters)
     cdef np.ndarray[int, ndim=1] assignment = np.zeros(n_clusters, dtype=np.int32)
@@ -197,6 +255,12 @@ def assignment(crd, index, clusters, int n_struct, int keep_best=1000):
     cdef int ci = 0
     cdef int max_nrg = keep_best
     for ci, cluster in enumerate(clusters):
+        chroms_involved = set()
+        for i in cluster:
+            chroms_involved.add(index.chrom[i])
+        if len(chroms_involved) > max_chrom_num:
+            assignment[ci] = -1
+            continue
         rg2s, best = compute_gyration_radius(crd, cluster, index, index.copy_index)
         order = np.argsort(rg2s)[:max_nrg]
         best_rgs = rg2s[order]
