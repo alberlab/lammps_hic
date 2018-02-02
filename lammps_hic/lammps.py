@@ -67,6 +67,7 @@ ARG_DEFAULT = {
     'damid': None,
     'bc_cluster': None,
     'bc_cluster_size': 2.0,
+    'bc_cluster_max': 1000,
     'out': 'out.lammpstrj',
     'data': 'input.data',
     'lmp': 'minimize.lam',
@@ -384,7 +385,7 @@ def _chromosome_string_to_numeric_id(chrom):
 
 
 def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, size_factor, 
-                          coord, radii, n_atoms):
+                          coord, radii, n_atoms, max_clusters=-1):
 
     def cbrt(x):
         return (x)**(1./3.)
@@ -396,6 +397,10 @@ def _gen_bc_cluster_bonds(bonds_container, cluster_file, struct_i, size_factor,
         idxptr = f['indptr'][()]
         structidx = f['assignment'][()]
         (curr_clusters, ) = np.where(structidx == struct_i)
+        if max_clusters > 0 and len(curr_clusters) > max_clusters:
+            curr_clusters = np.random.choice(curr_clusters, 
+                                             size=max_clusters,
+                                             replace=False)
         for cluster_id in curr_clusters:
             start_pos = idxptr[cluster_id]
             end_pos = idxptr[cluster_id + 1]
@@ -888,7 +893,8 @@ def generate_input(crd, bead_radii, chrom, **kwargs):
             centroids = _gen_bc_cluster_bonds(bond_list, args['bc_cluster'],
                                               args['i'], args['bc_cluster_size'],
                                               crd, bead_radii, 
-                                              n_atoms + dummies.n_dummy)
+                                              n_atoms + dummies.n_dummy,
+                                              args['bc_cluster_max'])
             n_centroids = len(centroids)
     else:
         centroids = []

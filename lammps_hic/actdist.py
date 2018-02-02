@@ -229,7 +229,7 @@ def get_actdists(parallel_client, crd_fname, probability_matrix, theta, last_ad,
     proc_chunk = 0
     while proc_chunk*CHUNK_SIZE < len(args):
         tp = args[proc_chunk:proc_chunk+1]
-        logger.debug('get_actdist(): running chunk %d of %d: %d pairs', proc_chunk + 1, len(args)/CHUNK_SIZE + 1,  len(tp))
+        logger.debug('get_actdist(): running chunk %d of %d: %d blocks', proc_chunk + 1, len(args)/CHUNK_SIZE + 1,  len(tp))
         dview = parallel_client[:]
         dview.use_cloudpickle()
         engine_ids = list(parallel_client.ids)
