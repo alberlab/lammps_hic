@@ -48,26 +48,48 @@ def apply_hic_restraints(model, crd, radii, index, user_args):
     actdists = read_actdists(ad_fname)
 
     for (i, j, d, p) in actdists:
+
         ii = copy_index[i]
         jj = copy_index[j]
 
-        n_combinations = len(ii)*len(jj)
-        n_possible_contacts = min(len(ii), len(jj))
-        
-        cd = np.zeros(n_combinations)
         # NOTE: activation distances are surface to surface, not center to center
         rsph = radii[i] + radii[j]
         dcc = d + rsph  # center to center distance
 
-        it = 0
-        for k in ii:
-            for m in jj:
+        # we assume that intrachromosomal reads are always from 
+        # the same copy
+
+        if (index.chrom[i] != index.chrom[j]):
+            
+            n_combinations = len(ii)*len(jj)
+            n_possible_contacts = min(len(ii), len(jj))
+            
+            cd = np.zeros(n_combinations)
+            
+            it = 0
+            for k in ii:
+                for m in jj:
+                    x = crd[k]
+                    y = crd[m] 
+                    cd[it] = norm(x - y)
+                    it += 1
+
+        else: 
+
+            assert(len(ii) == len(jj))
+            n_combinations = len(ii)
+            n_possible_contacts = len(ii)
+            
+            cd = np.zeros(n_combinations)
+            
+            for it in range(len(ii)):
+                k = ii[it]
+                m = jj[it]
                 x = crd[k]
                 y = crd[m] 
                 cd[it] = norm(x - y)
-                it += 1
 
-        # find closest distance and remove incompatible contacts
+        # find closest distances in n_compatible contacts
         idx = np.argsort(cd)
 
         if cd[idx[0]] > dcc:
@@ -78,12 +100,16 @@ def apply_hic_restraints(model, crd, radii, index, user_args):
                                 r0=crange * rsph)
         
         for it in range(n_possible_contacts):
+        
             if cd[idx[it]] > dcc:
                 break
-            else:
+            
+            if (index.chrom[i] != index.chrom[j]):
                 k = ii[idx[it] // len(jj)]
                 m = jj[idx[it] % len(jj)]
-                model.add_bond(k, m, bt, Bond.HIC)
-                
-
+            else:
+                k = ii[idx[it]]
+                m = jj[idx[it]]
         
+            model.add_bond(k, m, bt, Bond.HIC)
+            
